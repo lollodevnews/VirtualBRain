@@ -46,3 +46,9 @@ The current v1.0 release establishes the physical **4-bit VBR baseline** and the
 ## Future Scope
 * **Deep 1-Bit/2-Bit Physical Packing:** Upgrading the byte-packer to physically cram 4 to 8 weights into a single byte based on the Entropy Sieve's map, pushing the model toward ~2.0 BPW.
 * **Dynamic Perplexity:** Exploring biological "cognitive dimming"—allowing the emulator to dynamically drop from 4-bit deep thinking to 1-bit instinctual routing depending on prompt complexity.
+* ### Future Scope: Neural Turing Execution (Dynamic LISP Routing)
+VirtualBRain v2.0 will transition the engine from a sequential layer executor into a non-sequential, Turing-complete Neural CPU. The architecture will physically partition the matrix output vector:
+* **The Payload:** The upper dimensions carrying the VBR-processed semantic features.
+* **The Address Register:** The bottom columns dynamically calculating a 32-bit integer pointer.
+
+Instead of a static forward pass, the VirtualBRain Engine will execute a dynamic `while` loop. If the matrix outputs a positive address (`EVAL`), the engine routes the payload to the specific VRAM location of the next required expert matrix. If the matrix outputs a `0` address (`APPLY`), the cognitive loop halts, and the token is generated immediately. This will enable infinite-depth, dynamic-routing logic directly at the matrix level.
