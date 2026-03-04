@@ -40,8 +40,8 @@ To eliminate dynamic range dead-space, VirtualBRain calculates a 1-bit global fl
 
 The current v1.0 release establishes the physical **4-bit VBR baseline** and the LISP machine execution graph. It physically packs two 4-bit weights per byte, cutting legacy FP16 model sizes in half while proving the structural integrity of the Dust Anchor theory.
 
-* `run_compressor.py`: The Decompiler. Ingests standard Hugging Face models and outputs the decoupled RISC components.
-* `brescia.py`: The Virtual Machine. Surgically injects the `BresciaLinear` emulator into the model's architecture to execute the packed logic on the fly.
+* `importer.py`: The Decompiler. Ingests standard Hugging Face models and outputs the decoupled RISC components.
+* `VirtualBRainEngine.py`: The Virtual Machine. Surgically injects the `BresciaLinear` emulator into the model's architecture to execute the packed logic on the fly.
 
 ## Future Scope
 * **Deep 1-Bit/2-Bit Physical Packing:** Upgrading the byte-packer to physically cram 4 to 8 weights into a single byte based on the Entropy Sieve's map, pushing the model toward ~2.0 BPW.
