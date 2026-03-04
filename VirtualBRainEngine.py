@@ -185,15 +185,15 @@ def load_virtualBrain_model(model_id, virtualBrain_file):
 # =============================================================================
 if __name__ == "__main__":
     MODEL_ID = "Qwen/Qwen1.5-0.5B"
-    BRESCIA_FILE = "qwen_virtualBrain_test.pt"
+    BRAIN_FILE = "qwen_virtualBrain_test.pt"
     
     # Check if the user already ran the compressor (which you did!)
-    if not os.path.exists(BRESCIA_FILE):
-        print("VirtualBRain file not found. Run your run_compressor_vbr.py first!")
+    if not os.path.exists(BRAIN_FILE):
+        print("VirtualBRain file not found. Run your importer.py first!")
         exit()
 
     # 1. Boot up the Virtual Machine
-    model = load_virtualBrain_model(MODEL_ID, BRESCIA_FILE)
+    model = load_virtualBrain_model(MODEL_ID, BRAIN_FILE)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     
     # Move the grafted model to your GPU for testing
