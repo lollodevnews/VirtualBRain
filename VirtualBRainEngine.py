@@ -209,7 +209,7 @@ if __name__ == "__main__":
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     
     print("\nVirtualBRain Engine generating...")
-    with torch.no_grad():with torch.no_grad():
+    with torch.no_grad():
         outputs = model.generate(**inputs, max_new_tokens=50, do_sample=False)
         
     response = tokenizer.decode(outputs[0], skip_special_tokens=True)
