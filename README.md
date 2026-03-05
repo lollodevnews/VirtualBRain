@@ -36,6 +36,14 @@ To eliminate dynamic range dead-space, VirtualBRain calculates a 1-bit global fl
 * **Unsigned:** The feature detector only flows in one direction from the dust. The integer bins are packed tightly from the anchor to the extreme.
 * **Signed:** The feature detector crosses zero. The integer bins are anchored at the center dust and scale symmetrically outward.
 
+### 5. Zero-Overhead Soft-FPGA Execution (Deep Pipelining)
+Unlike traditional quantization schemes that require heavy software emulation to unpack weights back into floating-point for the ALU, VirtualBRain operates as a **Soft-FPGA**. 
+* **The LUTs:** The 1-bit to 4-bit VBR integer planes function as native Look-Up Tables. 
+* **The Interconnects:** The `inverse_indices` routing keys act as programmable interconnects, re-wiring the matrix's spatial geometry on the fly.
+* **Zero Translation Overhead:** Because the emulator relies entirely on primitive bitwise operators (`>> 4`, `& 0x0F`, `|`) at the silicon level, there is zero instruction-translation overhead. 
+
+This creates a deep, high-speed execution pipeline. Like the Pentium 4's NetBurst architecture, but without the fatal flaw of branch-prediction pipeline flushes—because in high-dimensional spectral space, unresolved branches naturally multiply to zero, allowing the engine to stream tokens through an ultra-fast assembly line of micro-logic.
+
 ## Current State & Usage
 
 The current v1.0 release establishes the physical **4-bit VBR baseline** and the LISP machine execution graph. It physically packs two 4-bit weights per byte, cutting legacy FP16 model sizes in half while proving the structural integrity of the Dust Anchor theory.
