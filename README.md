@@ -67,6 +67,6 @@ VirtualBRain's dynamic routing is possible because standard LLMs are already int
 * **The State Register & Instruction Pointer:** The Residual Stream. It is not just a data highway; it carries the 4,096-dimensional instruction state for the next layer.
 * **The ALU (Processor):** The MLP blocks (Up Proj -> Function -> Down Proj) read the state, perform logic, and add the updated instruction back to the residual stream.
 * **The Read/Write Head:** The Attention Mechanism sweeps across the tape, fetching exact variables and historical context.
-* **The Infinite Tape:** The Autoregressive Loop and Key-Value (KV) Cache. 
+* **The Infinite Tape (The Filesystem):** The Autoregressive Loop and Key-Value (KV) Cache. 
 
-VirtualBRain does not bolt on Turing completeness; it natively embraces it. By allowing a matrix to output its own address, VBR spins up a recursive `while` loop, outputting intermediate "scratchpad" tokens directly to the KV Tape. Furthermore, by merging the `down_proj` into the VBR function block, the LISP machine escapes the fixed-width bottleneck of the residual highway, processing logic dynamically in high-dimensional spectral space until the mathematical entropy collapses.
+VirtualBRain does not bolt on Turing completeness; it natively embraces it. By merging the `down_proj` into the VBR function block, the LISP machine computes natively in high-dimensional spectral space (the system RAM). It chains logic gates dynamically, and only compresses back down to the chosen "filesystem format" (the fixed-width residual highway and KV cache) to save the state once the mathematical entropy collapses and the thought resolves.
