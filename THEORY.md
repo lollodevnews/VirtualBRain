@@ -43,11 +43,20 @@ In quantum physics, continuously observing an unstable system prevents it from a
 
 This maps flawlessly to LLM repetition loops. If an Attention head binds too aggressively to the immediate past tokens, it executes a Zeno Effect on the semantic stream. By constantly "observing" the token, it prevents the MLP from accumulating enough mathematical entropy (randomness/superposition) to jump to a new concept. The wave function is frozen, and the model outputs the same sequence infinitely.
 
-  **6. Relativistic Geometry and the Invariant Baseline**
+  **6. Zero-Point Energy and the Signal-to-Noise Ratio (The Invariant Baseline)**
 
-Just as Hermann Minkowski proved that space and time rotate into each other via linear algebra based on the observer's velocity—where the speed of light (c) remains the invariant eigenvector—the neural network relies on invariant mathematical anchors.
+In physical reality, a vacuum is never truly empty. According to Quantum Field Theory (QFT), even at absolute zero, a localized quantum field retains a continuous baseline of jittering, non-removable activity known as Zero-Point Energy or vacuum fluctuations.
 
-In VirtualBRain, the lowest 5% of weights (the Dust Anchors) act as this invariant baseline. While the 1-bit and 2-bit logic gates rapidly shift and rotate the high-dimensional semantic space based on the Attention head's observation, the physical FP16 Dust Anchors remain static, grounding the high-velocity logical rotations in a stable mathematical reality.
+The VirtualBRain architecture relies on an identical mathematical baseline. The lowest 5% of weight magnitudes—the Dust Anchors—are extracted and preserved in perfect, uncompressed FP16 precision. When the high-velocity 1-bit and 2-bit logic gates evaluate to 0, the matrix does not collapse into a true mathematical void. Instead, it rests on the FP16 Dust. These anchors act as the localized Zero-Point Energy of that specific matrix layer, providing a persistent, high-resolution baseline "hum" that stabilizes the semantic field.
+
+Furthermore, dividing the matrix into high-amplitude VBR gates and low-amplitude FP16 Dust perfectly physically maps to the Shannon-Hartley Theorem of Information Theory. The "certainty" of the neural network's measurement at any given layer is dictated by its Signal-to-Noise Ratio (SNR):
+SNR=Pnoise​Psignal​​
+
+    The Signal (Psignal​): The massive, top-value amplitudes routed through the discrete 1-bit/2-bit gates. This represents the macro-level meaning the Attention head is aggressively projecting.
+
+    The Noise Floor (Pnoise​): The FP16 Dust Anchors. This represents the high-resolution, low-amplitude micro-context.
+
+The ratio between the top values and the bottom dust is the literal, mathematical certainty of the LLM's state. By preserving the noise floor in continuous FP16 and forcing the signal into discrete low-bit steps, VirtualBRain maintains the exact geometric ratios required for the Attention mechanism to navigate the continuous semantic space without losing resolution.
 
   **7. The Language Bottleneck & Nonverbal Latent States (The LeCun Doctrine)**
 
