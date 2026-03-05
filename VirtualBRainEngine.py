@@ -28,112 +28,43 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 
-# =============================================================================
-# 1. THE VIRTUAL MACHINE (DECODER) - VBR UPGRADE
-# =============================================================================
-class VirtualBRainLinear(nn.Module):
-    def __init__(self, in_features, out_features, packed_dict, prefix=""):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
+# ==============================================================================
+# VirtualBRain (VBR) - Runtime Execution Engine
+# ==============================================================================
+
+class VirtualBrainLinear:
+    def __init__(self, packed_data_dict):
+        """
+        Loads the pre-compiled VBR matrix.
+        """
+        self.W_packed = packed_data_dict["W_packed_4bit"]
+        self.col_mins = packed_data_dict["col_mins"]
+        self.vbr_scales = packed_data_dict["vbr_scales"] # The pre-divided multiplier
+        self.inverse_indices = packed_data_dict["inverse_indices"]
         
-        # Load the Stratified Physical Components
-        # (Assuming the Packer now saves these three separate chunks)
-        self.W_1bit = nn.Parameter(packed_dict[f"{prefix}.W_1bit"], requires_grad=False)
-        self.W_2bit = nn.Parameter(packed_dict[f"{prefix}.W_2bit"], requires_grad=False)
-        self.W_4bit = nn.Parameter(packed_dict[f"{prefix}.W_4bit"], requires_grad=False)
-        
-        self.col_mins = nn.Parameter(packed_dict[f"{prefix}.col_mins"], requires_grad=False)
-        self.col_ranges = nn.Parameter(packed_dict[f"{prefix}.col_ranges"], requires_grad=False)
-        self.inverse_indices = nn.Parameter(packed_dict[f"{prefix}.inverse_indices"], requires_grad=False)
+        # Determine shapes
+        self.out_features = self.W_packed.shape[0]
+        self.in_features = self.W_packed.shape[1] * 2
 
     def forward(self, x):
-        device = x.device
+        """
+        Executes the forward pass with zero division overhead.
+        """
+        # 1. Unpack the 4-bit containers into flat integers
+        W_flat = torch.zeros((self.out_features, self.in_features), dtype=torch.uint8, device=x.device)
+        W_flat[:, 0::2] = (self.W_packed >> 4) & 0x0F
+        W_flat[:, 1::2] = self.W_packed & 0x0F
         
-        # --- 1. STRATIFIED UNPACKING ---
-        unpacked_chunks = []
+        # 2. Reconstruct the FP16 matrix (Multiplication ONLY)
+        # We multiply the integer directly by the pre-divided vbr_scale, then add the dust anchor.
+        W_reconstructed = (W_flat.to(torch.float16) * self.vbr_scales) + self.col_mins
         
-        # Unpack 1-bit (8 weights per byte)
-        if self.W_1bit.numel() > 0:
-            rows_1b = self.W_1bit.shape[0]
-            U1 = torch.empty((rows_1b, self.in_features), dtype=torch.uint8, device=device)
-            for bit in range(8):
-                U1[:, bit::8] = (self.W_1bit >> (7 - bit)) & 0b00000001
-            unpacked_chunks.append(U1)
-            
-        # Unpack 2-bit (4 weights per byte)
-        if self.W_2bit.numel() > 0:
-            rows_2b = self.W_2bit.shape[0]
-            U2 = torch.empty((rows_2b, self.in_features), dtype=torch.uint8, device=device)
-            for bit in range(4):
-                U2[:, bit::4] = (self.W_2bit >> (6 - (bit * 2))) & 0b00000011
-            unpacked_chunks.append(U2)
-            
-        # Unpack 4-bit (2 weights per byte)
-        if self.W_4bit.numel() > 0:
-            rows_4b = self.W_4bit.shape[0]
-            U4 = torch.empty((rows_4b, self.in_features), dtype=torch.uint8, device=device)
-            U4[:, 0::2] = (self.W_4bit >> 4) & 0x0F
-            U4[:, 1::2] = self.W_4bit & 0x0F
-            unpacked_chunks.append(U4)
-            
-        # --- 2. REASSEMBLE AND UNSCRAMBLE ---
-        # Stack them back into the sorted [out_features, in_features] array
-        W_int_sorted = torch.cat(unpacked_chunks, dim=0).to(x.dtype)
+        # 3. Unsort the matrix using the inverse indices (The Router)
+        W_unsorted = W_reconstructed[self.inverse_indices]
         
-        # Analog Amplification (The Resistors & Dust Anchor)
-        # Note: We apply this BEFORE unscrambling because col_ranges/col_mins are also sorted!
-        W_shifted = (W_int_sorted / 15.0) * self.col_ranges
-        W_reconstructed = W_shifted + self.col_mins
-        
-        # Snap the geometry back to original LISP routing layout
-        W_unscrambled = W_reconstructed[self.inverse_indices]
-        
-        # Fire the Token
-        return F.linear(x, W_unscrambled)
+        # 4. Standard FP16 Matrix Multiplication against the token stream
+        return torch.matmul(x, W_unsorted.t())
 
-# =============================================================================
-# 1. THE VIRTUAL MACHINE (DECODER)
-# =============================================================================
-class VirtualBRainLinear(nn.Module):
-    """
-    The LISP Machine Emulator. 
-    Replaces standard nn.Linear. Unpacks 4-bit VBR routing masks on the fly,
-    applies FP16 Dust Anchors, and unscrambles the dimensional space.
-    """
-    def __init__(self, in_features, out_features, packed_dict, prefix=""):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        
-        # Load the decoupled physical components
-        self.W_packed = nn.Parameter(packed_dict[f"{prefix}.W_packed_4bit"], requires_grad=False)
-        self.col_mins = nn.Parameter(packed_dict[f"{prefix}.col_mins"], requires_grad=False)
-        self.col_ranges = nn.Parameter(packed_dict[f"{prefix}.col_ranges"], requires_grad=False)
-        self.inverse_indices = nn.Parameter(packed_dict[f"{prefix}.inverse_indices"], requires_grad=False)
-
-    def forward(self, x):
-        # 1. Bitwise Unpacking (Split the byte into two 4-bit integers)
-        W_high = (self.W_packed >> 4) & 0x0F
-        W_low = self.W_packed & 0x0F
-        
-        # Reconstruct the logic gates
-        W_int4 = torch.empty((self.out_features, self.in_features), dtype=torch.uint8, device=x.device)
-        W_int4[:, 0::2] = W_high
-        W_int4[:, 1::2] = W_low
-        
-        # Cast to match the input activation precision (FP16)
-        W_float = W_int4.to(x.dtype)
-        
-        # 2. Analog Amplification (The Resistors & Dust Anchor)
-        W_shifted = (W_float / 15.0) * self.col_ranges
-        W_reconstructed = W_shifted + self.col_mins
-        
-        # 3. Unscramble the Spatial Geometry
-        W_unscrambled = W_reconstructed[self.inverse_indices]
-        
-        # 4. Fire the Token
-        return F.linear(x, W_unscrambled)
 
 # =============================================================================
 # 2. THE DECOMPILER (ENCODER) - 4-BIT BASELINE WITH FIXED SIEVE
