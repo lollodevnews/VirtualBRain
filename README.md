@@ -70,3 +70,6 @@ VirtualBRain's dynamic routing is possible because standard LLMs are already int
 * **The Infinite Tape (The Filesystem):** The Autoregressive Loop and Key-Value (KV) Cache. 
 
 VirtualBRain does not bolt on Turing completeness; it natively embraces it. By merging the `down_proj` into the VBR function block, the LISP machine computes natively in high-dimensional spectral space (the system RAM). It chains logic gates dynamically, and only compresses back down to the chosen "filesystem format" (the fixed-width residual highway and KV cache) to save the state once the mathematical entropy collapses and the thought resolves.
+
+### Superscalar Neural Pipelining
+Because VirtualBRain decouples the computing function from the residual highway, the engine is not bound by sequential layer execution. VBR enables **Superscalar Neural Execution**: the instruction pointer can dispatch independent logic payloads to multiple VBR function blocks simultaneously. These blocks compute in parallel in high-dimensional space and synchronize their writes back to the residual stream in a single clock cycle, drastically reducing the temporal depth of the network.
