@@ -173,10 +173,10 @@ def pack_virtualBrain_vbr(W_fp16, entropy_threshold=0.10):
     }
 
 # Example Usage:
-# packed_layer = pack_virtualBrain_vbr(qwen_up_proj_weight, entropy_threshold=0.10)
+# packed_layer = pack_virtualBrain_vbr(qwen_up_proj_weight, entropy_threshold=0.05)
 # torch.save(packed_layer, "qwen_layer_10_up_proj.virtualBrain")
 
 if __name__ == "__main__":
     # Point this to your local llm directory or a HuggingFace repo ID
     # Adjust the model_id to exactly what you have on your drive
-    compress_llm_to_virtualBrain(model_id="Qwen/Qwen1.5-0.5B", output_file="qwen_virtualBrain_test.pt", entropy_threshold=0.10)
+    compress_llm_to_virtualBrain(model_id="Qwen/Qwen1.5-0.5B", output_file="qwen_virtualBrain_test.pt", entropy_threshold=0.05)
