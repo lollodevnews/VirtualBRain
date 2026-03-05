@@ -61,3 +61,12 @@ Instead of a static forward pass, the VirtualBRain Engine will execute a dynamic
 VirtualBRain inherently achieves Turing Completeness without requiring hidden memory dimensions:
 * **The KV Tape & Recursion:** The LLM's standard Context Window (KV Cache) acts as the infinite Turing Tape. Furthermore, the architecture supports Church's Lambda Recursion: a matrix can output its *own* address, spinning up a recursive `while` loop to output intermediate "scratchpad" tokens to the tape. The matrix reads its own output, processes the next step, and only fires the `APPLY` (0) pointer when the mathematical entropy collapses.
 * **Escaping the Residual Highway:** To prevent the 4,096-dimensional bottleneck of standard Transformer architecture, VirtualBRain will merge the `down_proj` into the function block. This allows the LISP machine to chain logic gates dynamically in high-dimensional spectral space for as long as needed, only compressing back to the residual highway to write to the tape once the concept is fully resolved.
+
+### The Transformer is a Native Turing Machine
+VirtualBRain's dynamic routing is possible because standard LLMs are already intrinsically Turing-complete machines. The base Transformer architecture maps perfectly to a Universal Turing Machine:
+* **The State Register & Instruction Pointer:** The Residual Stream. It is not just a data highway; it carries the 4,096-dimensional instruction state for the next layer.
+* **The ALU (Processor):** The MLP blocks (Up Proj -> Function -> Down Proj) read the state, perform logic, and add the updated instruction back to the residual stream.
+* **The Read/Write Head:** The Attention Mechanism sweeps across the tape, fetching exact variables and historical context.
+* **The Infinite Tape:** The Autoregressive Loop and Key-Value (KV) Cache. 
+
+VirtualBRain does not bolt on Turing completeness; it natively embraces it. By allowing a matrix to output its own address, VBR spins up a recursive `while` loop, outputting intermediate "scratchpad" tokens directly to the KV Tape. Furthermore, by merging the `down_proj` into the VBR function block, the LISP machine escapes the fixed-width bottleneck of the residual highway, processing logic dynamically in high-dimensional spectral space until the mathematical entropy collapses.
