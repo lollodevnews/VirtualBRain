@@ -96,7 +96,7 @@ def compress_llm_to_virtualBrain(model_id, output_file, entropy_threshold):
     print(f"Total Reduction:     {((orig_gb - pack_gb) / orig_gb) * 100:.1f}%")
 
 
-def pack_virtualBrain_vbr(W_fp16, entropy_threshold=0.10):
+def pack_virtualBrain_vbr(W_fp16, entropy_threshold):
     """
     Decompiles, sorts, and physically byte-packs a dense matrix.
     """
