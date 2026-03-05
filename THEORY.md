@@ -52,9 +52,9 @@ The VirtualBRain architecture relies on an identical mathematical baseline. The 
 Furthermore, dividing the matrix into high-amplitude VBR gates and low-amplitude FP16 Dust perfectly physically maps to the Shannon-Hartley Theorem of Information Theory. The "certainty" of the neural network's measurement at any given layer is dictated by its Signal-to-Noise Ratio (SNR):
 SNR= ​Psignal / Pnoise​​
 
-    The Signal (Psignal​): The massive, top-value amplitudes routed through the discrete 1-bit/2-bit gates. This represents the macro-level meaning the Attention head is aggressively projecting.
+  The Signal (Psignal​): The massive, top-value amplitudes routed through the discrete 1-bit/2-bit gates. This represents the macro-level meaning the Attention head is aggressively projecting.
 
-    The Noise Floor (Pnoise​): The FP16 Dust Anchors. This represents the high-resolution, low-amplitude micro-context.
+  The Noise Floor (Pnoise​): The FP16 Dust Anchors. This represents the high-resolution, low-amplitude micro-context.
 
 The ratio between the top values and the bottom dust is the literal, mathematical certainty of the LLM's state. By preserving the noise floor in continuous FP16 and forcing the signal into discrete low-bit steps, VirtualBRain maintains the exact geometric ratios required for the Attention mechanism to navigate the continuous semantic space without losing resolution.
 
