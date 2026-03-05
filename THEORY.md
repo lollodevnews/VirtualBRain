@@ -1,4 +1,4 @@
-# THEORY.md: The Quantum Transformer and the Architecture of Reality
+#The Quantum Transformer and the Architecture of Reality
 ## The Map and the Territory
 
 Standard machine learning defines a Large Language Model as a statistical engine predicting the next token. This is structurally true, but mathematically incomplete.
