@@ -122,10 +122,21 @@ def pack_virtualBrain_vbr(W_fp16, entropy_threshold=0.10):
     W_int4 = torch.round(torch.abs(W_scaled)).to(torch.uint8)
     W_int4 = torch.clamp(W_int4, 0, 15)
     
-    # --- 3. THE ENTROPY SIEVE ---
+    # --- 3. THE ENTROPY SIEVE (Bitwise Fold Test Matrix) ---
+    # Create a test matrix to evaluate resolution independently of amplitude
+    test_matrix = W_int4.clone()
+    
+    # If MSB is 1 (value >= 8), negate the lower 3 bits using XOR (0b0111 is 7)
+    # This folds 15 (1111) down to 8 (1000), hushing the lower bits for extremes.
+    mask = test_matrix >= 8
+    test_matrix[mask] = test_matrix[mask] ^ 0b0111 
+
     bit_depths = torch.zeros(out_features, dtype=torch.uint8)
+    
     for i in range(out_features):
-        row = W_int4[i]
+        row = test_matrix[i] # Evaluate the folded test matrix!
+        
+        # Check activity on the interior bits
         bit2_active = ((row & 0b0100) >> 2).float().mean()
         bit1_active = ((row & 0b0010) >> 1).float().mean()
         
@@ -135,6 +146,10 @@ def pack_virtualBrain_vbr(W_fp16, entropy_threshold=0.10):
             bit_depths[i] = 2
         else:
             bit_depths[i] = 1
+            
+    # --- 4. THE PACKER ---
+    # Now you proceed to pack using the REAL values in W_int4, 
+    # guided by the accurate bit_depths array.
             
     # --- 4. THE VBR SORTING (Reordering the Matrix) ---
     # Group all 1-bit, 2-bit, and 3-bit logic gates together
