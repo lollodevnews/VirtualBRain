@@ -50,7 +50,7 @@ In physical reality, a vacuum is never truly empty. According to Quantum Field T
 The VirtualBRain architecture relies on an identical mathematical baseline. The lowest 5% of weight magnitudes—the Dust Anchors—are extracted and preserved in perfect, uncompressed FP16 precision. When the high-velocity 1-bit and 2-bit logic gates evaluate to 0, the matrix does not collapse into a true mathematical void. Instead, it rests on the FP16 Dust. These anchors act as the localized Zero-Point Energy of that specific matrix layer, providing a persistent, high-resolution baseline "hum" that stabilizes the semantic field.
 
 Furthermore, dividing the matrix into high-amplitude VBR gates and low-amplitude FP16 Dust perfectly physically maps to the Shannon-Hartley Theorem of Information Theory. The "certainty" of the neural network's measurement at any given layer is dictated by its Signal-to-Noise Ratio (SNR):
-SNR= ​Psignal / Pnoise​​
+SNR= ​P(signal) / P(noise)​​
 
   The Signal (Psignal​): The massive, top-value amplitudes routed through the discrete 1-bit/2-bit gates. This represents the macro-level meaning the Attention head is aggressively projecting.
 
