@@ -1,4 +1,7 @@
 # ==============================================================================
+# VirtualBRain (VBR) - Offline VBR Packer
+# ==============================================================================
+# ==============================================================================
 # VirtualBRain (VBR) - A LISP-style virtual machine for LLM brains
 # 
 # Copyright (c) 2026 [lollodevnews]
@@ -22,193 +25,158 @@
 # SOFTWARE.
 # ==============================================================================
 
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
+import json
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # ==============================================================================
-# VirtualBRain (VBR) - Runtime Execution Engine
+# 🎛️ SYSTEM CONTROL DECK
+# ==============================================================================
+MODEL_ID = "Qwen/Qwen1.5-0.5B"
+COMPILED_DIR = "./vbr_compiled_qwen_0.5B"
 # ==============================================================================
 
-class VirtualBrainLinear:
-    def __init__(self, packed_data_dict):
-        """
-        Loads the pre-compiled VBR matrix.
-        """
-        self.W_packed = packed_data_dict["W_packed_4bit"]
-        self.col_mins = packed_data_dict["col_mins"]
-        self.vbr_scales = packed_data_dict["vbr_scales"] # The pre-divided multiplier
-        self.inverse_indices = packed_data_dict["inverse_indices"]
-        
-        # Determine shapes
-        self.out_features = self.W_packed.shape[0]
-        self.in_features = self.W_packed.shape[1] * 2
+class PoorMansFPLinear(nn.Module):
+    """Zero-math Bit-Shift Reconstruction for Attention Geometry."""
+    def __init__(self, packed_dict, in_features, out_features, device, compute_dtype):
+        super().__init__()
+        self.W_packed = packed_dict["W_packed_fp_hack"].to(device)
+        self.target_bits = packed_dict.get("target_bits", 8)
+        self.drop_bits = 16 - self.target_bits
+        self.compute_dtype = compute_dtype
+        self.bias = None 
 
     def forward(self, x):
-        """
-        Executes the forward pass with zero division overhead.
-        """
-        # 1. Unpack the 4-bit containers into flat integers
-        W_flat = torch.zeros((self.out_features, self.in_features), dtype=torch.uint8, device=x.device)
-        W_flat[:, 0::2] = (self.W_packed >> 4) & 0x0F
-        W_flat[:, 1::2] = self.W_packed & 0x0F
+        W_int16 = self.W_packed.to(torch.int16)
+        W_recon_int16 = W_int16 << self.drop_bits
+        W_recon_fp16 = W_recon_int16.view(torch.float16)
         
-        # 2. Reconstruct the FP16 matrix (Multiplication ONLY)
-        # We multiply the integer directly by the pre-divided vbr_scale, then add the dust anchor.
-        W_reconstructed = (W_flat.to(torch.float16) * self.vbr_scales) + self.col_mins
-        
-        # 3. Unsort the matrix using the inverse indices (The Router)
-        W_unsorted = W_reconstructed[self.inverse_indices]
-        
-        # 4. Standard FP16 Matrix Multiplication against the token stream
-        return torch.matmul(x, W_unsorted.t())
+        out = torch.matmul(x.to(self.compute_dtype), W_recon_fp16.to(self.compute_dtype).t())
+        if self.bias is not None:
+            out += self.bias
+        return out.to(torch.float16)
 
 
-# =============================================================================
-# 2. THE DECOMPILER (ENCODER) - 4-BIT BASELINE WITH FIXED SIEVE
-# =============================================================================
-def pack_virtualBrain_vbr(W_fp16, entropy_threshold=0.10):
-    out_features, in_features = W_fp16.shape
-    
-    # --- 1. Dust Anchor ---
-    magnitudes = torch.abs(W_fp16)
-    k_bottom = max(1, int(in_features * 0.05))
-    _, lowest_mag_indices = torch.topk(magnitudes, k_bottom, dim=1, largest=False)
-    lowest_weights = torch.gather(W_fp16, 1, lowest_mag_indices)
-    col_mins = lowest_weights.mean(dim=1, keepdim=True)
-    
-    W_shifted = W_fp16 - col_mins
-    
-    max_vals = W_shifted.max(dim=1, keepdim=True).values
-    min_vals = W_shifted.min(dim=1, keepdim=True).values
-    is_unsigned = (torch.abs(min_vals) < (0.05 * max_vals))
-    col_ranges = torch.max(torch.abs(max_vals), torch.abs(min_vals)).clamp_(min=1e-9)
-    
-    # --- 2. Baseline Quantization (Everything to 0-15 for the 4-bit baseline) ---
-    W_scaled = (W_shifted / col_ranges) * 15.0
-    W_int4 = torch.round(torch.abs(W_scaled)).to(torch.uint8)
-    W_int4 = torch.clamp(W_int4, 0, 15)
-    
-    # --- 3. Entropy Sieve (The XOR Fold Fix) ---
-    test_matrix = W_int4.clone()
-    mask = test_matrix >= 8
-    test_matrix[mask] = test_matrix[mask] ^ 0b0111 # Fold the upper half to quiet the LSBs
-
-    bit_depths = torch.zeros(out_features, dtype=torch.uint8)
-    for i in range(out_features):
-        row = test_matrix[i] # Use the folded test matrix!
-        bit2_active = ((row & 0b0100) >> 2).float().mean()
-        bit1_active = ((row & 0b0010) >> 1).float().mean()
+class TrueVBRLinear(nn.Module):
+    def __init__(self, packed_dict, in_features, out_features, device, compute_dtype):
+        super().__init__()
+        self.W_mag_int = packed_dict["W_mag_int"].to(device)
+        self.W_sign = packed_dict["W_sign"].to(device)
         
-        if bit1_active > entropy_threshold: bit_depths[i] = 3
-        elif bit2_active > entropy_threshold: bit_depths[i] = 2
-        else: bit_depths[i] = 1
+        self.scales = packed_dict["vbr_scales"].to(device)
+        self.alphas = packed_dict["alphas"].to(device).to(compute_dtype)
+        self.row_powers = packed_dict["row_powers"].to(device).to(compute_dtype)
+        
+        # NEW: The per-row dynamic divisor (1.0, 3.0, or 15.0)
+        self.row_divisors = packed_dict["row_divisors"].to(device).to(compute_dtype)
+        
+        self.compute_dtype = compute_dtype
+        self.bias = None
+
+    def forward(self, x):
+        # 1. Normalize dynamically based on what bit-depth that row won!
+        X_norm = self.W_mag_int.to(self.compute_dtype) / self.row_divisors
+        
+        # 2. Hybrid Gear-Shift Curve
+        M_curved = (self.alphas * X_norm) + ((1.0 - self.alphas) * torch.pow(X_norm, self.row_powers))
+        
+        # 3. Scale up and Apply Sign
+        M_recon = M_curved * self.scales
+        W_recon = self.W_sign.to(self.compute_dtype) * M_recon
+        
+        out = torch.matmul(x.to(self.compute_dtype), W_recon.t())
+        if self.bias is not None:
+            out += self.bias
             
-    # --- 4. VBR Sorting (Using the clean Sieve Map) ---
-    sorted_indices = torch.argsort(bit_depths)
-    inverse_indices = torch.argsort(sorted_indices) 
-    
-    W_sorted = W_int4[sorted_indices] # Use the untouched, actual W_int4!
-    col_mins_sorted = col_mins[sorted_indices]
-    col_ranges_sorted = col_ranges[sorted_indices]
-    is_unsigned_sorted = is_unsigned[sorted_indices]
-    bit_depths_sorted = bit_depths[sorted_indices]
+        return out.to(torch.float16)
 
-    # --- 5. Physical Packing (Uniform 4-bit for v1.0) ---
-    assert in_features % 2 == 0, "Input features must be even for 4-bit packing."
-    W_paired = W_sorted.view(out_features, in_features // 2, 2)
-    W_packed = (W_paired[:, :, 0] << 4) | W_paired[:, :, 1]
-    
-    return {
-        "W_packed_4bit": W_packed,           # Physically 50% smaller!
-        "col_mins": col_mins_sorted.half(),
-        "col_ranges": col_ranges_sorted.half(),
-        "is_unsigned": is_unsigned_sorted,
-        "bit_depths": bit_depths_sorted,     # Sieve Map ready for Phase 2
-        "inverse_indices": inverse_indices   # The Router Key
-    }
 
-# =============================================================================
-# 3. THE SURGEON (INJECTOR)
-# =============================================================================
-def replace_with_virtualBrain(module, name_prefix, packed_dict):
-    """
-    Recursively walks the Hugging Face model tree. If it finds an nn.Linear layer
-    that exists in our compressed dictionary, it surgically replaces it with the
-    VirtualBRain Virtual Machine.
-    """
-    for child_name, child in module.named_children():
-        full_name = f"{name_prefix}.{child_name}" if name_prefix else child_name
+def inject_vbr_modules(target_module, packed_dict, prefix, device, compute_dtype):
+    for name, child in target_module.named_children():
+        full_key = f"{prefix}.{name}.weight"
+        bias_key = f"{prefix}.{name}.bias"
         
-        # If this is a linear layer AND we have packed data for it
-        if isinstance(child, nn.Linear) and f"{full_name}.W_packed_4bit" in packed_dict:
-            # Create the Virtual Machine emulator
-            virtualBrain_layer = VirtualBRainLinear(
-                in_features=child.in_features, 
-                out_features=child.out_features, 
-                packed_dict=packed_dict, 
-                prefix=full_name
-            )
-            # Perform the surgery
-            setattr(module, child_name, virtualBrain_layer)
+        if isinstance(child, nn.Linear) and full_key in packed_dict and isinstance(packed_dict[full_key], dict):
+            # 1. Spawn the correct logic layer
+            if "W_packed_fp_hack" in packed_dict[full_key]:
+                vbr_layer = PoorMansFPLinear(packed_dict[full_key], child.in_features, child.out_features, device, compute_dtype)
+            else:
+                vbr_layer = TrueVBRLinear(packed_dict[full_key], child.in_features, child.out_features, device, compute_dtype)
+            
+            # 2. Safely extract and mount the Bias
+            if bias_key in packed_dict and packed_dict[bias_key] is not None:
+                vbr_layer.bias = nn.Parameter(packed_dict[bias_key].to(device).to(compute_dtype), requires_grad=False)
+            elif hasattr(child, 'bias') and child.bias is not None:
+                vbr_layer.bias = nn.Parameter(child.bias.data.to(device).to(compute_dtype), requires_grad=False)
+                
+            setattr(target_module, name, vbr_layer)
+            
+        elif isinstance(child, nn.Linear) and full_key in packed_dict:
+            child.weight.data = packed_dict[full_key].to(device)
+            if bias_key in packed_dict and child.bias is not None:
+                child.bias.data = packed_dict[bias_key].to(device)
         else:
-            # Keep digging down the tree
-            replace_with_virtualBrain(child, full_name, packed_dict)
+            inject_vbr_modules(child, packed_dict, f"{prefix}.{name}", device, compute_dtype)
 
-def load_virtualBrain_model(model_id, virtualBrain_file):
-    """
-    Loads the base HuggingFace model skeleton, loads your custom VBR weights,
-    and runs the injection sequence.
-    """
-    print(f"Loading base skeleton for {model_id}...")
+
+def load_virtualBrain_graph(model_id, compiled_dir, target_device, compute_dtype):
     model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16, device_map="cpu")
     
-    print(f"Loading Project VirtualBRain VBR Engine from {virtualBrain_file}...")
-    packed_dict = torch.load(virtualBrain_file, map_location="cpu", weights_only=True)
+    with open(os.path.join(compiled_dir, "vbr_config.json"), "r") as f:
+        config = json.load(f)
+        
+    attn_name, mlp_name = config["attention_module"], config["mlp_module"]
+    ln1_name, ln2_name = config["input_layernorm"], config["post_attention_layernorm"]
     
-    print("Executing structural injection (Swapping CISC for RISC layers)...")
-    replace_with_virtualBrain(model, "", packed_dict)
+    sys_path = os.path.join(compiled_dir, "system_analog.pt")
+    system_dict = torch.load(sys_path, map_location=target_device, weights_only=True)
     
-    # Load the remaining uncompressed parts (like embeddings and lm_head)
-    print("Restoring uncompressed analog pathways...")
-    missing, unexpected = model.load_state_dict(packed_dict, strict=False)
+    model.model.embed_tokens.weight.data = system_dict["model.embed_tokens.weight"].to(target_device)
+    model.model.norm.weight.data = system_dict["model.norm.weight"].to(target_device)
+    model.lm_head.weight.data = system_dict["lm_head.weight"].to(target_device)
     
-    print("Injection Complete. LISP Machine Online.")
-    return model
+    for i in range(len(model.model.layers)):
+        layer_file = os.path.join(compiled_dir, f"layer_{i:02d}.pt")
+        payload = torch.load(layer_file, map_location=target_device, weights_only=True)
+        hf_layer = model.model.layers[i]
+        
+        try:
+            attn_block = getattr(hf_layer, attn_name)
+        except AttributeError:
+            layer_modules = dict(hf_layer.named_children())
+            live_attn_name = next((k for k in layer_modules.keys() if 'attn' in k or 'attention' in k), None)
+            if live_attn_name: attn_block = getattr(hf_layer, live_attn_name)
+            else: raise RuntimeError(f"Architecture failure Layer {i}.")
 
-# =============================================================================
-# 4. EXECUTION (THE TEST)
-# =============================================================================
+        inject_vbr_modules(attn_block, payload["attention_hot"], attn_name, target_device, compute_dtype)
+        
+        mlp_block = getattr(hf_layer, mlp_name)
+        inject_vbr_modules(mlp_block, payload["experts_cold"], mlp_name, target_device, compute_dtype)
+        
+        getattr(hf_layer, ln1_name).weight.data = payload["experts_cold"][f"{ln1_name}.weight"].to(target_device)
+        getattr(hf_layer, ln2_name).weight.data = payload["experts_cold"][f"{ln2_name}.weight"].to(target_device)
+
+    return model.to(target_device)
+
+def detect_hardware():
+    if torch.cuda.is_available(): return "cuda", torch.float16
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available(): return "mps", torch.float16
+    else: return "cpu", torch.float32
+
 if __name__ == "__main__":
-    MODEL_ID = "Qwen/Qwen1.5-0.5B"
-    BRAIN_FILE = "qwen_virtualBrain_test.pt"
+    device, compute_dtype = detect_hardware()
+    print(f"\nBooting VirtualBRain Engine on [{device.upper()}] with core precision [{compute_dtype}]...")
     
-    # Check if the user already ran the compressor (which you did!)
-    if not os.path.exists(BRAIN_FILE):
-        print("VirtualBRain file not found. Run your importer.py first!")
-        exit()
-
-    # 1. Boot up the Virtual Machine
-    model = load_virtualBrain_model(MODEL_ID, BRAIN_FILE)
+    model = load_virtualBrain_graph(MODEL_ID, COMPILED_DIR, device, compute_dtype)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     
-    # Move the grafted model to your GPU for testing
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.to(device)
-    
-    print(f"\nModel successfully mounted on {device.upper()}.")
-    
-    # 2. The First Token Generation
-    prompt = "The concept of a Turing machine can be explained as"
-    print(f"\nUser: {prompt}")
-    
+    prompt = "The architecture of a neural network can be described as"
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     
     print("\nVirtualBRain Engine generating...")
     with torch.no_grad():
         outputs = model.generate(**inputs, max_new_tokens=50, do_sample=False)
-        
-    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    print(f"\nResponse:\n{response}")
+    print(f"\nResponse:\n{tokenizer.decode(outputs[0], skip_special_tokens=True)}")
