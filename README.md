@@ -1,6 +1,50 @@
 # VirtualBRain (VBR)
 **A LISP-style virtual machine emulator for LLM brains.**
 
+[Image of Digital Signal Processor architecture diagram]
+
+Standard Large Language Model (LLM) inference treats neural networks as legacy Complex Instruction Set Computers (CISC). They use massive, monolithic FP16 matrices to simultaneously calculate boolean routing logic, nuanced perplexity, and analog amplitude in a single, bandwidth-heavy pass. 
+
+**VirtualBRain (VBR)** is a fundamentally different approach to quantization and model execution. It is a **Universal Inference Emulator** that decompiles dense neural networks into a Reduced Instruction Set (RISC) architecture. It physically decouples the network's boolean logic gates from its analog signal amplitude. 
+
+By treating the neural network as a Digital Signal Processor (DSP), VirtualBRain rebuilds the 1970s LISP Machine for modern GPUs: executing ultra-fast, variable-bitrate integer routing masks anchored to stable floating-point baselines.
+
+## Quick Start & Usage
+
+To execute the VirtualBRain pipeline from the terminal, use the following commands:
+* `python3 importer.py`: Downloads the target Hugging Face LLM, runs the non-linear MSE/Relative Error tournaments, and packs the weights into the VBR RISC format.
+* `python3 VirtualBRainEngine.py`: Decodes the packed files and runs the model via the zero-overhead virtual machine.
+* `python3 benchmark.py`: Validates the perplexity equivalence of the compressed model against the FP16 baseline, proving the geometry of the compression.
+
+---
+
+## Core Architectural Concepts
+
+### 1. The Dust Anchor (True Zero-Point Geometry)
+Standard "blunt" quantization relies on absolute minimums and maximums, making the math highly vulnerable to freak outliers and shifting the true zero into fractional decimals. VirtualBRain introduces the **Dust Anchor**. 
+
+During the packing phase, the engine zeroes out the lowest mathematical noise. By enforcing a strict Signed-Magnitude architecture, Bin $0$ is perfectly, mathematically locked to $0.0$. If a weight is dust, it contributes absolutely zero noise to the Fused Multiply-Add (FMA), acting as a pristine baseline resistor.
+
+### 2. Decoupled Logic, Amplitude, and Sign (The 5-Bit Footprint)
+VirtualBRain destroys the FP16 monolith by breaking the forward pass into pure geometry. It isolates the Sign ($S$), the Variable-Bitrate Magnitude ($X$), and the Absolute Outlier Ceiling ($M_{max}$).
+
+$$W_{recon} = S \times \left( \alpha \cdot X + (1 - \alpha) \cdot X^p \right) \times M_{max}$$
+
+* **The Sign Matrix ($S$):** A 1-bit explicitly separated matrix (+1 or -1).
+* **The Logic Gate ($X$):** Pure structural routing using 4-bit unsigned magnitudes.
+* **The Resistor ($M_{max}$ in FP16):** The analog amplifier that applies the absolute maximum scaling range to the signals that survive the logic gates.
+
+**Total memory footprint:** 5 bits per weight (4-bit magnitude + 1-bit sign), dramatically outperforming naive 8-bit truncation.
+
+### 3. The Dynamic Alpha ($\alpha$) Gear-Shift
+[Image of dynamic companding curve shifting slope to capture extreme outliers while preserving mid-range density]
+
+Standard linear quantizers either crush the dense midrange associative memory to capture outliers, or clip the outliers to save the midrange. VirtualBRain solves this with an organic, non-linear **Hybrid Gear-Shift Curve**.
+
+The compiler calculates the $99.5$th percentile of every row to separate the dense logic from the structural load-bearing outliers. It dynamically computes an $\alpha$ ratio to blend two curves:
+* **The Linear Floor:**# VirtualBRain (VBR)
+**A LISP-style virtual machine emulator for LLM brains.**
+
 Standard Large Language Model (LLM) inference treats neural networks as legacy Complex Instruction Set Computers (CISC). They use massive, monolithic FP16 matrices to simultaneously calculate boolean routing logic, nuanced perplexity, and analog amplitude in a single, bandwidth-heavy pass. 
 
 **VirtualBRain (VBR)** is a fundamentally different approach to quantization and model execution. It is a **Universal Inference Emulator** that decompiles dense neural networks into a Reduced Instruction Set (RISC) architecture. It physically decouples the network's boolean logic gates from its analog signal amplitude. 
@@ -91,8 +135,6 @@ VirtualBRain does not bolt on Turing completeness; it natively embraces it. By m
 
 ### Superscalar Neural Pipelining
 Because VirtualBRain decouples the computing function from the residual highway, the engine is not bound by sequential layer execution. VBR enables **Superscalar Neural Execution**: the instruction pointer can dispatch independent logic payloads to multiple VBR function blocks simultaneously. These blocks compute in parallel in high-dimensional space and synchronize their writes back to the residual stream in a single clock cycle, drastically reducing the temporal depth of the network.
-
-
 
 ### Quantum Emulation and State Superposition
 Beyond classical computing limits, the VirtualBRain architecture is uniquely designed to natively leverage quantum states and emulate quantum information mechanics. As demonstrated in the `qpu_emulator.py` module, the VBR matrix geometry flawlessly maps to high-dimensional Hilbert spaces and tensor networks. 
