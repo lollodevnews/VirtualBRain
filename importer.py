@@ -25,140 +25,165 @@
 # SOFTWARE.
 # ==============================================================================
 
+
 import torch
 import os
+import json
+import shutil
 from transformers import AutoModelForCausalLM
+from tqdm import tqdm
 
-def compress_llm_to_virtualBrain(model_id, output_file, entropy_threshold):
-    print(f"=== Initiating Project VirtualBRain Decompiler ===")
-    print(f"Target Model: {model_id}")
-    print(f"Loading FP16 weights into System RAM (This may take a minute)...")
-    
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, 
-        torch_dtype=torch.float16, 
-        device_map="cpu"
-    )
-    
-    packed_state_dict = {}
-    total_original_bytes = 0
-    total_packed_bytes = 0
-    
-    print("\n--- Starting Matrix Entropy Sieve ---")
-    
-    for name, param in model.named_parameters():
-        original_bytes = param.element_size() * param.nelement()
-        total_original_bytes += original_bytes
-        
-        if "weight" in name and param.dim() == 2 and "embed" not in name and "lm_head" not in name:
-            print(f"Compressing: {name} | Shape: {list(param.shape)}")
-            
-            packed_data = pack_virtualBrain_vbr(param.data, entropy_threshold)
-            
-            packed_bytes = (
-                packed_data["W_packed_4bit"].element_size() * packed_data["W_packed_4bit"].nelement() +
-                packed_data["col_mins"].element_size() * packed_data["col_mins"].nelement() +
-                packed_data["vbr_scales"].element_size() * packed_data["vbr_scales"].nelement() +
-                packed_data["bit_depths"].element_size() * packed_data["bit_depths"].nelement() +
-                packed_data["inverse_indices"].element_size() * packed_data["inverse_indices"].nelement()
-            )
-            total_packed_bytes += packed_bytes
-            
-            packed_state_dict[f"{name}.W_packed_4bit"] = packed_data["W_packed_4bit"]
-            packed_state_dict[f"{name}.col_mins"] = packed_data["col_mins"]
-            packed_state_dict[f"{name}.vbr_scales"] = packed_data["vbr_scales"] # THE NEW PRE-DIVIDED ANCHOR
-            packed_state_dict[f"{name}.is_unsigned"] = packed_data["is_unsigned"]
-            packed_state_dict[f"{name}.bit_depths"] = packed_data["bit_depths"]
-            packed_state_dict[f"{name}.inverse_indices"] = packed_data["inverse_indices"]
-            
-        else:
-            print(f"Bypassing:   {name} (Preserving exact FP16)")
-            packed_state_dict[name] = param.data
-            total_packed_bytes += original_bytes
+# ==============================================================================
+# 🎛️ SYSTEM CONTROL DECK (PHASE 4: ADAPTIVE GAMMA HYBRID)
+# ==============================================================================
+MODEL_ID = "Qwen/Qwen1.5-0.5B"
+OUTPUT_DIR = "./vbr_compiled_qwen_0.5B"
 
-    print("\n=== Compression Complete ===")
-    print(f"Saving virtual machine state to: {output_file}")
-    torch.save(packed_state_dict, output_file)
-    
-    orig_gb = total_original_bytes / (1024**3)
-    pack_gb = total_packed_bytes / (1024**3)
-    print(f"\nOriginal Model Size: {orig_gb:.2f} GB")
-    print(f"VirtualBRain VBR Size:    {pack_gb:.2f} GB")
-    print(f"Total Reduction:     {((orig_gb - pack_gb) / orig_gb) * 100:.1f}%")
+# Architecture Routing
+COMPRESS_ATTENTION_FP_HACK = True  
+TARGET_HACK_BITS = 8               
 
+COMPRESS_MLP_VBR = True            
+TARGET_PRECISION = 0.05
+# ==============================================================================
 
-def pack_virtualBrain_vbr(W_fp16, entropy_threshold):
-    out_features, in_features = W_fp16.shape
+def pack_poor_mans_fp(W_fp16, target_bits=8):
+    """Zero-math bit truncation for Attention geometry."""
+    drop_bits = 16 - target_bits
+    mask = (1 << target_bits) - 1 
     
-    # --- 1. THE DUST ANCHOR ---
-    magnitudes = torch.abs(W_fp16)
-    k_bottom = max(1, int(in_features * 0.05))
-    _, lowest_mag_indices = torch.topk(magnitudes, k_bottom, dim=1, largest=False)
-    lowest_weights = torch.gather(W_fp16, 1, lowest_mag_indices)
-    col_mins = lowest_weights.mean(dim=1, keepdim=True)
-    
-    W_shifted = W_fp16 - col_mins
-    
-    max_vals = W_shifted.max(dim=1, keepdim=True).values
-    min_vals = W_shifted.min(dim=1, keepdim=True).values
-    is_unsigned = (torch.abs(min_vals) < (0.05 * max_vals))
-    col_ranges = torch.max(torch.abs(max_vals), torch.abs(min_vals)).clamp_(min=1e-9)
-    
-    # --- 2. THE ENTROPY SIEVE (Find the optimal bit-depth) ---
-    W_scaled_test = (W_shifted / col_ranges) * 15.0
-    W_int4_test = torch.round(torch.abs(W_scaled_test)).to(torch.uint8).clamp(0, 15)
-    
-    test_matrix = W_int4_test.clone()
-    mask = test_matrix >= 8
-    test_matrix[mask] = test_matrix[mask] ^ 0b0111 
-
-    bit_depths = torch.zeros(out_features, dtype=torch.uint8)
-    for i in range(out_features):
-        row = test_matrix[i]
-        bit2_active = ((row & 0b0100) >> 2).float().mean()
-        bit1_active = ((row & 0b0010) >> 1).float().mean()
-        
-        if bit1_active > entropy_threshold:
-            bit_depths[i] = 4
-        elif bit2_active > entropy_threshold:
-            bit_depths[i] = 3
-        else:
-            # We skip 1-bit here to allow for 2-bit (states 0, 1, 2, 3) as the baseline minimum
-            bit_depths[i] = 2 
-            
-    # --- 3. THE DIVISION-FREE VBR SCALING ---
-    # Calculate the discrete denominators: (2^b - 1) -> 3, 7, or 15
-    states_max = (2 ** bit_depths.float().unsqueeze(1)) - 1
-    
-    # Pre-divide the amplitude by the states. This is the magic VBR anchor.
-    vbr_scales = col_ranges / states_max
-    
-    # Re-quantize the actual weights to their exact integer states using the new anchor
-    W_vbr_int = torch.round(torch.abs(W_shifted) / vbr_scales).to(torch.uint8)
-            
-    # --- 4. THE VBR SORTING ---
-    sorted_indices = torch.argsort(bit_depths)
-    inverse_indices = torch.argsort(sorted_indices) 
-    
-    W_sorted = W_vbr_int[sorted_indices]
-    col_mins_sorted = col_mins[sorted_indices]
-    vbr_scales_sorted = vbr_scales[sorted_indices] # Sorted anchors
-    is_unsigned_sorted = is_unsigned[sorted_indices]
-    bit_depths_sorted = bit_depths[sorted_indices]
-
-    # --- 5. THE PHYSICAL PACKING ---
-    assert in_features % 2 == 0, "Input features must be even for packing."
-    W_paired = W_sorted.view(out_features, in_features // 2, 2)
-    W_packed = (W_paired[:, :, 0] << 4) | W_paired[:, :, 1]
+    W_raw_int16 = W_fp16.contiguous().view(torch.int16)
+    W_packed = ((W_raw_int16 >> drop_bits) & mask).to(torch.uint8)
     
     return {
-        "W_packed_4bit": W_packed,
-        "col_mins": col_mins_sorted.half(),
-        "vbr_scales": vbr_scales_sorted.half(), # The pre-divided FP16 multiplier
-        "is_unsigned": is_unsigned_sorted,
-        "bit_depths": bit_depths_sorted,
-        "inverse_indices": inverse_indices
+        "W_packed_fp_hack": W_packed,
+        "target_bits": target_bits
     }
 
+def pack_true_vbr_signed_magnitude(W_fp16):
+    """Phase 9: True Mixed-Precision VBR (1-bit, 2-bit, 4-bit Magnitude)"""
+    out_features, in_features = W_fp16.shape
+    
+    W_f32 = W_fp16.to(torch.float32)
+    M = W_f32.abs()
+    S = torch.where(W_f32 >= 0, torch.tensor(1, dtype=torch.int8, device=W_f32.device), 
+                                torch.tensor(-1, dtype=torch.int8, device=W_f32.device))
+    
+    # Dynamic Alpha
+    ceiling = torch.quantile(M, 0.995, dim=1, keepdim=True)
+    col_maxs = M.max(dim=1, keepdim=True).values.clamp(min=1e-9)
+    alphas = (ceiling / col_maxs).clamp(min=0.01, max=1.0)
+    
+    # Tournament Trackers
+    best_recon_error = torch.full((out_features,), float('inf'), device=W_f32.device)
+    best_M_int = torch.zeros((out_features, in_features), dtype=torch.uint8, device=W_f32.device)
+    best_powers = torch.zeros((out_features,), dtype=torch.float32, device=W_f32.device)
+    
+    # NEW: Tracks the exact scalar divisor for the engine (defaults to 4-bit / 15.0)
+    best_divisors = torch.full((out_features,), 15.0, dtype=torch.float32, device=W_f32.device) 
+    
+    # NEW: Boolean mask to lock rows once they achieve < 5% error
+    row_satisfied = torch.zeros((out_features,), dtype=torch.bool, device=W_f32.device)
+    
+    powers = [1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0, 48.0, 64.0]
+    
+    # Test ascending bit-depths!
+    bit_configs = [1, 2, 4] 
+    
+    for bits in bit_configs:
+        states_max = (2 ** bits) - 1
+        
+        for p in powers:
+            # Generate Curve
+            x_norm = torch.linspace(0, 1, states_max + 1, device=W_f32.device, dtype=torch.float32).view(1, -1)
+            curve_norm = (alphas * x_norm) + ((1.0 - alphas) * torch.pow(x_norm, p))
+            bin_values = col_maxs * curve_norm
+            
+            # LUT Mapping
+            distances = torch.abs(M.unsqueeze(-1) - bin_values.unsqueeze(1))
+            M_int = torch.argmin(distances, dim=-1)
+            M_recon = torch.gather(bin_values, 1, M_int)
+            
+            # Relative Error Judge
+            relative_error = torch.mean( ((M - M_recon) / (M + 1e-4)) ** 2, dim=1 )
+            
+            # Only update rows that haven't hit the 5% target at a lower bit-depth
+            valid_mask = ~row_satisfied
+            better_mask = (relative_error < best_recon_error) & valid_mask
+            
+            # Update metrics
+            best_recon_error[better_mask] = relative_error[better_mask]
+            best_M_int[better_mask] = M_int[better_mask].to(torch.uint8)
+            best_powers[better_mask] = p
+            best_divisors[better_mask] = float(states_max)
+        
+        # End of bit-depth tournament: Did any new rows achieve < 5% Mean Relative Error?
+        # 5% squared is 0.0025.
+        threshold_mask = (best_recon_error < 0.0025)
+        row_satisfied = row_satisfied | threshold_mask
+
+    # Optional: Print out the distribution so you can see the VBR in action!
+    print(f"1-Bit Rows: {(best_divisors == 1.0).sum().item()} | 2-Bit Rows: {(best_divisors == 3.0).sum().item()} | 4-Bit Rows: {(best_divisors == 15.0).sum().item()}")
+
+    return {
+        "W_mag_int": best_M_int,              
+        "W_sign": S,                          
+        "vbr_scales": col_maxs.half(),        
+        "alphas": alphas.half(),
+        "row_powers": best_powers.unsqueeze(1).half(),
+        "row_divisors": best_divisors.unsqueeze(1).half() # Passes the exact step-size!
+    }
+
+def compile_model_stream():
+    if os.path.exists(OUTPUT_DIR): shutil.rmtree(OUTPUT_DIR)
+    os.makedirs(OUTPUT_DIR)
+    
+    print(f"Loading Source Model {MODEL_ID} into CPU RAM...")
+    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float16, device_map="cpu")
+    
+    attn_name = "self_attn"
+    mlp_name = "mlp"
+    ln1_name = "input_layernorm"
+    ln2_name = "post_attention_layernorm"
+
+    config_data = {
+        "attention_module": attn_name,
+        "mlp_module": mlp_name,
+        "input_layernorm": ln1_name,
+        "post_attention_layernorm": ln2_name
+    }
+    with open(os.path.join(OUTPUT_DIR, "vbr_config.json"), "w") as f:
+        json.dump(config_data, f)
+
+    system_tensors = {
+        "model.embed_tokens.weight": model.model.embed_tokens.weight.data,
+        "model.norm.weight": model.model.norm.weight.data,
+        "lm_head.weight": model.lm_head.weight.data
+    }
+    torch.save(system_tensors, os.path.join(OUTPUT_DIR, "system_analog.pt"))
+
+    for i, layer in enumerate(tqdm(model.model.layers, desc="Compiling Layers")):
+        attention_hot = {}
+        experts_cold = {}
+        
+        for name, param in layer.named_parameters():
+            is_2d_weight = "weight" in name and param.dim() == 2
+            is_attn = attn_name in name
+            is_mlp = mlp_name in name
+            
+            if is_2d_weight and is_attn and COMPRESS_ATTENTION_FP_HACK:
+                attention_hot[name] = pack_true_vbr_signed_magnitude(param.data)
+                #attention_hot[name] = pack_poor_mans_fp(param.data, TARGET_HACK_BITS)
+            elif is_2d_weight and is_mlp and COMPRESS_MLP_VBR:
+                experts_cold[name] = pack_true_vbr_signed_magnitude(param.data)
+                #experts_cold[name] = pack_poor_mans_fp(param.data, TARGET_HACK_BITS)
+            else:
+                # Bypass / Layernorms / Biases
+                if is_attn: attention_hot[name] = param.data
+                else: experts_cold[name] = param.data
+
+        torch.save({"attention_hot": attention_hot, "experts_cold": experts_cold}, os.path.join(OUTPUT_DIR, f"layer_{i:02d}.pt"))
+
 if __name__ == "__main__":
-    compress_llm_to_virtualBrain(model_id="Qwen/Qwen1.5-0.5B", output_file="qwen_virtualBrain_test.pt", entropy_threshold=0.05)
+    compile_model_stream()
+    print("=== Compilation Complete ===")
