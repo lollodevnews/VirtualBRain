@@ -1,10 +1,7 @@
 # VirtualBRain (VBR)
 **A LISP-style virtual machine emulator for LLM brains.**
 
-
-
-[Image of Digital Signal Processor architecture diagram]
-
+![VirtualBRain Architecture Diagram](https://github.com/lollodevnews/VirtualBRain/blob/main/diagram.png?raw=true)
 
 Standard Large Language Model (LLM) inference treats neural networks as legacy Complex Instruction Set Computers (CISC). They use massive, monolithic FP16 matrices to simultaneously calculate boolean routing logic, nuanced perplexity, and analog amplitude in a single, bandwidth-heavy pass. 
 
