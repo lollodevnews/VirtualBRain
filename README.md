@@ -96,3 +96,14 @@ python3 eval_perplexity_v28.py
 ```bash
 python3 v28_inference.py
 ```
+
+---
+
+## 🚀 The Roadmap & Future Scope
+
+VirtualBrain is not just a quantizer; it is the foundation for a non-sequential, Turing-complete Neural CPU. Our active research pipeline includes:
+
+* **Bare-Metal GPU Fusion (HIP/Triton):** Fusing the continuous polynomial S-Curve evaluation directly into the Matrix Multiplication SRAM steps to achieve native FP16 token throughput with a 5-bit memory footprint.
+* **Mixed-Precision MoE Tournaments:** Dynamically assigning 1-bit to 4-bit divisors per-row for Mixture of Experts (like Mixtral), physically collapsing cold expert blocks while preserving high precision for chaotic logic hubs.
+* **Neural Turing Execution (LISP Routing):** Transitioning from a sequential layer executor to a dynamic `while` loop, allowing the matrix to output a 32-bit integer pointer to physically address the next required expert matrix in VRAM.
+* **Quantum Emulation:** Leveraging the VBR architecture's mapping to high-dimensional Hilbert spaces to execute logic gates that mimic quantum search algorithms on classical deterministic silicon (see `theory/qpu_emulator.py`).
