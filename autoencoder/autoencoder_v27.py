@@ -15,11 +15,7 @@ MODEL_ID = os.path.expanduser("~/models/quant/qwen25_7b")
 OUTPUT_DIR = os.path.expanduser("~/models/quant/vbr_qwen25_v27")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# The Sane Bare-Metal Thresholds
-MAX_ENERGY_ERROR_EXPERT    = 0.01      
-MAX_ENERGY_ERROR_ATTENTION = 0.0005    
-
+  
 # ==========================================
 # THE V25 NEURAL COMPRESSOR
 # ==========================================
