@@ -13,7 +13,7 @@
 VirtualBrain is structured as a monorepo. Please navigate to the specific module you wish to explore:
 
 * **[`📁 autoencoder/`](./autoencoder/)** — **[CURRENT STATE OF THE ART]** Contains the V28 Neural Compressor and the Python Inference Emulator. This is where the continuous $(a, b, m, n)$ polynomial math and the 7B compression pipeline live.
-* **[`📁 theory/`](./theory/)** — Contains the core physics philosophy. Explores how the Transformer maps to Quantum Superposition, Wave-Collapse (Decoherence), and zero-point energy, complete with a QPU Emulator script.
+* **[`📁 theory/`](./Theory/)** — Contains the core physics philosophy. Explores how the Transformer maps to Quantum Superposition, Wave-Collapse (Decoherence), and zero-point energy, complete with a QPU Emulator script.
 * **[`📁 qwen1.5_0.5b/`](./qwen1.5_0.5b/)** — **[ARCHIVE]** The historical "Phase 4" proof of concept. A rigid 5-bit grid implementation that first proved the viability of Signed-Magnitude VBR logic. 
 * **`📁 engine_hip/`** — **[COMING SOON]** The bare-metal C++ AMD/ROCm Soft-FPGA inference kernel.
 
