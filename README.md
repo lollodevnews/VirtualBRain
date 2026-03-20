@@ -6,10 +6,6 @@
 > ⚠️ **IMPORTANT: THE BUILDER'S SHIELD**
 > There are many good intuitions here that are being explored, but don't treat this as "the truth". This is a highly experimental work in progress and, like every construction site, there are plenty of exposed sharp edges that will hurt you if you are not careful. Enjoy with awareness.
 
-> **THE V28 REDEMPTION ARCHIVE:** Yesterday, in V18, we declared complex Autoencoders dead. The massive 14GB matrix geometry and PyTorch ROCm memory bombs forced us to fall back to dumb brute-forcing, yielding a bloated 11GB model. 
-> 
-> **Today, we proved that conclusion wrong.** By engineering strictly in-place micro-batched VRAM bypasses and introducing a Pareto-Optimal Variable Bitrate (VBR) Sieve, we successfully mapped an entire 7B model using continuous row-wise polynomials. Brute force is out. True continuous geometry is in.
-
 ---
 
 ## 🗺️ Repository Navigation
