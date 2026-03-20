@@ -17,6 +17,9 @@ OUTPUT_DIR = os.path.expanduser("~/models/quant/vbr_qwen25_v27")
 MAX_ENERGY_ERROR_EXPERT    = 0.01      
 MAX_ENERGY_ERROR_ATTENTION = 0.0005    
 
+LENIENCY_MAP_ATTENTION = {2: 4.0, 3: 2.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+LENIENCY_MAP_EXPERT = {2: 5.0, 3: 2.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
   
 # ==========================================
@@ -57,10 +60,10 @@ def compress_vbr_v25_matrix(name, weight):
     
     # THE V28 UPGRADE: Pareto-Optimal SNR Multipliers (D: Multiplier)
     if is_attention:
-        leniency_map = {2: 4.0, 3: 2.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+        leniency_map = LENIENCY_MAP_ATTENTION
     else:
         # MLPs can tolerate 5x more error at Q2, 2x more at Q3
-        leniency_map = {2: 5.0, 3: 2.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+        leniency_map = LENIENCY_MAP_EXPERT
 
     # ==========================================
     # THE VARIABLE BITRATE COMPRESSION LOOP
