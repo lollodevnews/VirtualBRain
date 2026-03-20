@@ -1,3 +1,8 @@
+# IMPORTANT
+
+
+There are many good intuitions here that are being explored, but don't treat this as "the truth". This is a work in progress and, like every construction site, there are plenty of exposed sharp edges that will hurt you if you are not careful. Enjoy with awareness
+
 # VirtualBRain (VBR)
 **A LISP-style virtual machine emulator for LLM brains.**
 
