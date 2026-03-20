@@ -14,6 +14,9 @@ print("==========================================")
 MODEL_ID = os.path.expanduser("~/models/quant/qwen25_7b")
 OUTPUT_DIR = os.path.expanduser("~/models/quant/vbr_qwen25_v27")
 
+MAX_ENERGY_ERROR_EXPERT    = 0.01      
+MAX_ENERGY_ERROR_ATTENTION = 0.0005    
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
   
 # ==========================================
@@ -49,7 +52,7 @@ def compress_vbr_v25_matrix(name, weight):
 
     # Dynamic Thresholds & V28 Leniency Multipliers
     is_attention = any(x in name for x in ["q_proj", "k_proj", "v_proj", "o_proj"])
-    base_threshold = 0.0005 if is_attention else 0.01
+    base_threshold = MAX_ENERGY_ERROR_ATTENTION if is_attention else MAX_ENERGY_ERROR_EXPERT
     threshold_chunk = torch.full((out_features,), base_threshold, device=device)
     
     # THE V28 UPGRADE: Pareto-Optimal SNR Multipliers (D: Multiplier)
