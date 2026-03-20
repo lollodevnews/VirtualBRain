@@ -65,7 +65,7 @@ Unlike standard repositories, we publish the exact mathematical degradation to p
 | Architecture | Model Size | WikiText-2 Perplexity | Degradation | Note |
 | :--- | :--- | :--- | :--- | :--- |
 | **Base (FP16)** | 14.0 GB | 6.1050 | - | Baseline intelligence |
-| **V18 (Brute Force)** | 11.0 GB | 6.1316 | +0.0266 | The bloated failure |
+| **V18 (simple VBR)** | 11.0 GB | 6.1316 | +0.0266 | The bloated failure |
 | **V28 (Pareto VBR)** | **4.8 GB** | **6.4656** | **+0.3606** | **The Mathematical Floor** |
 
 *Note: The 4.8 GB footprint is the strict, effective flat file size (~5.48 bpw) including all polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
