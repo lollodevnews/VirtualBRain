@@ -12,7 +12,7 @@
 
 VirtualBrain is structured as a monorepo. Please navigate to the specific module you wish to explore:
 
-* **[`📁 autoencoder/`](./autoencoder/)** — **[CURRENT STATE OF THE ART]** Contains the V28 Neural Compressor and the Python Inference Emulator. This is where the continuous $(a, b, m, n)$ polynomial math and the 7B compression pipeline live.
+* **[`📁 autoencoder/`](./autoencoder/)** — **[CURRENT STATE OF THE ART]** Contains the V27 Neural Compressor and the Python Inference Emulator. This is where the continuous $(a, b, m, n)$ polynomial math and the 7B compression pipeline live.
 * **[`📁 theory/`](./Theory/)** — Contains the core physics philosophy. Explores how the Transformer maps to Quantum Superposition, Wave-Collapse (Decoherence), and zero-point energy, complete with a QPU Emulator script.
 * **[`📁 qwen1.5_0.5b/`](./qwen1.5_0.5b/)** — **[ARCHIVE]** The historical "Phase 4" proof of concept. A rigid 5-bit grid implementation that first proved the viability of Signed-Magnitude VBR logic. 
 * **`📁 engine_hip/`** — **[COMING SOON]** The bare-metal C++ AMD/ROCm Soft-FPGA inference kernel.
@@ -28,7 +28,7 @@ Instead of relying on hidden FP16 grids, VBR uses a custom Autoencoder to mathem
 
 ---
 
-## 2. The Mathematical Formulation (V28)
+## 2. The Mathematical Formulation (V27)
 
 We fit a 4-parameter polynomial curve ($a, b, m, n$) to hyper-focus the quantization bins around the matrix's dense core, while expanding the tails to naturally absorb violent outliers.
 
@@ -48,7 +48,7 @@ By dynamically compiling this curve, the compressor creates a highly efficient b
 
 ## 3. The Pareto-Optimal VBR Sieve
 
-The true breakthrough of V28 is the **Dynamic Signal-to-Noise (SNR) Sieve**. 
+The true breakthrough of V27 is the **Dynamic Signal-to-Noise (SNR) Sieve**. 
 Instead of forcing a global bit-depth, the Sieve actively evaluates the Energy Loss (Relative Squared Error) of every single row during compilation and dynamically assigns it a bit-depth from 2-bit (Q2) to 8-bit (Q8).
 
 To achieve true Pareto efficiency, the thresholds are dynamically warped based on the neural architecture:
@@ -67,30 +67,30 @@ Unlike standard repositories, we publish the exact mathematical degradation to p
 | :--- | :--- | :--- | :--- | :--- |
 | **Base (FP16)** | 14.0 GB | 6.1050 | - | Baseline intelligence |
 | **V18 (Brute Force)** | 11.0 GB | 6.1316 | +0.0266 | The bloated failure |
-| **V28 (Pareto VBR)** | **4.8 GB** | **6.4656** | **+0.3606** | **The Mathematical Floor** |
+| **V27 (Pareto VBR)** | **4.8 GB** | **6.4656** | **+0.3606** | **The Mathematical Floor** |
 
 *Note: The 4.8 GB footprint is the strict, effective flat file size (~5.48 bpw) including all polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
 
 ---
 
-## Quick Start (V28 Pipeline)
+## Quick Start (V27 Pipeline)
 
 Navigate to the `autoencoder/` directory to run the state-of-the-art framework.
 
 **1. Compress the Model (VRAM Protected)**
 ```bash
 cd autoencoder
-python3 autoencoder_v28.py --chunk_idx 0 --gpu 0 --total_chunks 4
+python3 autoencoder_v27.py --chunk_idx 0 --gpu 0 --total_chunks 4
 ```
 
 **2. Evaluate the Intelligence**
 ```bash
-python3 eval_perplexity_v28.py
+python3 eval_perplexity_v27.py
 ```
 
 **3. Run Python Inference Emulator**
 ```bash
-python3 v28_inference.py
+python3 v27_inference.py
 ```
 
 ---
