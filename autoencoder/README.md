@@ -1,9 +1,9 @@
 # VirtualBrain VBR: The Polynomial Quantization Engine (V28)
 **A Variable Bitrate (VBR) quantization framework utilizing Continuous S-Curve Reparameterization.**
 
-> **THE V28 REDEMPTION ARCHIVE:** Yesterday, in V18, we declared complex Autoencoders dead. The massive 14GB matrix geometry and PyTorch ROCm memory bombs forced us to fall back to dumb brute-forcing, yielding a bloated 11GB model. 
+> **THE V28 REDEMPTION ARCHIVE:** Yesterday, in V18, we declared complex Autoencoders dead for this size of problem optimizations. The massive 14GB matrix geometry, the parameters range inherited by the brute force setup and the PyTorch ROCm memory bombs forced us to fall back to dumb brute-forcing or yielding a bloated 11GB model. 
 > 
-> **Today, we proved that conclusion wrong.** By engineering strictly in-place micro-batched VRAM bypasses and introducing a Pareto-Optimal Variable Bitrate (VBR) Sieve, we successfully mapped the entire 7B model using continuous row-wise polynomials. Brute force is out. True continuous geometry is in.
+> **Today, we proved that conclusion wrong.** By expanding the number of available combinations for the parameters well beyond what was reasonably computable via brute force we managed to leverage the strengths of the autoencoder, using gradient descent instead of brute force to map a wider area of potential values, avoiding local minima thanks to the strategical placement of the new grid of starting values. Brute force is out. True continuous geometry is in.
 
 ---
 
