@@ -7,7 +7,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM
 
 print("==========================================")
-print(" VIRTUALBRAIN V27: THE NEURAL AUTOENCODER ")
+print(" VIRTUALBRAIN V30: THE NEURAL AUTOENCODER ")
 print("==========================================")
 
 # --- CONFIGURATION ---
@@ -17,7 +17,7 @@ OUTPUT_DIR = os.path.expanduser("~/models/quant/vbr_qwen25_v27")
 MAX_ENERGY_ERROR_EXPERT    = 0.01      
 MAX_ENERGY_ERROR_ATTENTION = 0.0005    
 
-LENIENCY_MAP_ATTENTION = {2: 4.0, 3: 2.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+LENIENCY_MAP_ATTENTION = {2: 2.0, 3: 1.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
 LENIENCY_MAP_EXPERT = {2: 5.0, 3: 2.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -62,7 +62,6 @@ def compress_vbr_v25_matrix(name, weight):
     if is_attention:
         leniency_map = LENIENCY_MAP_ATTENTION
     else:
-        # MLPs can tolerate 5x more error at Q2, 2x more at Q3
         leniency_map = LENIENCY_MAP_EXPERT
 
     # ==========================================
@@ -100,14 +99,14 @@ def compress_vbr_v25_matrix(name, weight):
         if mag_bits > 3:
             active_dust = torch.zeros_like(raw_max_chunk)
         else:
-            dust_budget = chunk_energy * (current_threshold * 0.20)
-            # Use in-place square to save another 1GB of VRAM!
+            # THE V28.2 UPGRADE: Bin-Proportional Dust Budget
+            dynamic_dust_ratio = 1.0 / K_bins
+            dust_budget = chunk_energy * (current_threshold * dynamic_dust_ratio)
+            
             cum_energy = torch.cumsum(M_sorted.pow(2), dim=1) 
-            # THE FIX: Binary search bypasses the 4GB sum() reduction completely!
             counts = torch.searchsorted(cum_energy, dust_budget.unsqueeze(1)).squeeze(1)
             anchor_indices = (counts - 1).clamp(min=0)
             active_dust = torch.gather(M_sorted, 1, anchor_indices.unsqueeze(1)).squeeze(1)
-
         active_scale = raw_max_chunk - active_dust
 
         # ==========================================
@@ -132,6 +131,7 @@ def compress_vbr_v25_matrix(name, weight):
             test_points = [
                 (-2.5, 1.25), 
                 ( 2.5, 0.80), 
+                (-1.4, 2.40), 
                 ( 0.4, 1.85), 
                 (-1.3, 1.50), 
                 ( 0.0, 1.00)
@@ -157,7 +157,7 @@ def compress_vbr_v25_matrix(name, weight):
         opt_plateau = torch.optim.AdamW([a, m], lr=0.1, weight_decay=0.01)
         opt_joint = torch.optim.AdamW([a, b, m, n], lr=0.05, weight_decay=0.01)
 
-        def compute_loss():
+        def compute_loss(region="all"):
             a_c = a.unsqueeze(1)
             b_c = torch.clamp(b, 0.0, 1.0).unsqueeze(1)
             m_c = torch.clamp(m, 0.1, 4.0).unsqueeze(1)
@@ -168,17 +168,32 @@ def compress_vbr_v25_matrix(name, weight):
             curve = torch.clamp(curve, 0.0, 1.0)
 
             bin_chunk = (curve * active_scale.unsqueeze(1)) + active_dust.unsqueeze(1)
-            loss_fit = torch.nn.functional.mse_loss(bin_chunk.to(oracle_targets.dtype), oracle_targets, reduction='none').mean(dim=1)
+            
+            # Get the un-reduced MSE loss for every single bin
+            raw_mse = torch.nn.functional.mse_loss(bin_chunk.to(oracle_targets.dtype), oracle_targets, reduction='none')
+            
+            # THE V28.1 UPGRADE: MASKED GRADIENTS
+            if region == "tips":
+                # Only care about the right-side extreme (x >= 0.8)
+                mask = (safe_norm >= 0.8).float()
+                loss_fit = (raw_mse * mask).sum(dim=1) / mask.sum().clamp(min=1)
+            elif region == "plateau":
+                # Only care about the dense core (x < 0.8)
+                mask = (safe_norm < 0.8).float()
+                loss_fit = (raw_mse * mask).sum(dim=1) / mask.sum().clamp(min=1)
+            else:
+                loss_fit = raw_mse.mean(dim=1)
+
             diffs = curve[:, 1:] - curve[:, :-1]
             loss_mono = torch.relu(-diffs).sum(dim=1) * 100.0
 
             return (loss_fit + loss_mono).mean()
 
-        # Stages 1-4
-        for _ in range(10): opt_tips.zero_grad(); compute_loss().backward(); opt_tips.step()
-        for _ in range(10): opt_plateau.zero_grad(); compute_loss().backward(); opt_plateau.step()
-        for _ in range(10): opt_tips.zero_grad(); compute_loss().backward(); opt_tips.step()
-        for _ in range(10): opt_joint.zero_grad(); compute_loss().backward(); opt_joint.step()
+        # Stages 1-4: Now with decoupled visual fields!
+        for _ in range(10): opt_tips.zero_grad(); compute_loss(region="tips").backward(); opt_tips.step()
+        for _ in range(10): opt_plateau.zero_grad(); compute_loss(region="plateau").backward(); opt_plateau.step()
+        for _ in range(10): opt_tips.zero_grad(); compute_loss(region="tips").backward(); opt_tips.step()
+        for _ in range(10): opt_joint.zero_grad(); compute_loss(region="all").backward(); opt_joint.step()
 
         # --- 3. THE EVALUATION STAGE ---
         with torch.no_grad():
@@ -231,7 +246,6 @@ def compress_vbr_v25_matrix(name, weight):
         # --- 4. THE SIEVE UPDATE ---
         # The Sieve now actively utilizes the leniency multiplier!
         passed_curves = error_energy < (chunk_energy * current_threshold)
-        
         if passed_curves.any():
             global_passed_indices = active_indices[passed_curves]
             
