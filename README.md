@@ -68,7 +68,7 @@ Unlike standard repositories, we publish the exact mathematical degradation to p
 | **Base (FP16)** | 14.0 GB | 6.1050 | - | Baseline intelligence |
 | **V27 (Pareto VBR)** | **4.8 GB** | **6.4656** | **+0.3606** |  **Compressed** |
 
-*Note: The 4.8 GB footprint is the strict, effective flat file size (~5.48 bpw) including all polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
+*Note: The 4.8 GB footprint is the strict, effective flat file size (~5.48 bpw) including the dictionary, all polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
 
 ---
 
