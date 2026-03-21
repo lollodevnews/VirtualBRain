@@ -7,7 +7,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM
 
 print("==========================================")
-print(" VIRTUALBRAIN V30: THE NEURAL AUTOENCODER ")
+print(" VIRTUALBRAIN V27: THE NEURAL AUTOENCODER ")
 print("==========================================")
 
 # --- CONFIGURATION ---
@@ -153,9 +153,12 @@ def compress_vbr_v25_matrix(name, weight):
             m.data.copy_(best_m)
 
         # --- 2. THE OPTIMIZERS ---
+
+        
         opt_tips = torch.optim.AdamW([b, n], lr=0.1, weight_decay=0.01)
         opt_plateau = torch.optim.AdamW([a, m], lr=0.1, weight_decay=0.01)
         opt_joint = torch.optim.AdamW([a, b, m, n], lr=0.05, weight_decay=0.01)
+
 
         def compute_loss(region="all"):
             a_c = a.unsqueeze(1)
@@ -189,12 +192,22 @@ def compress_vbr_v25_matrix(name, weight):
 
             return (loss_fit + loss_mono).mean()
 
-        # Stages 1-4: Now with decoupled visual fields!
+        # --- PHASE 1: ISOLATED FOCUS ---
+        # Lock in the aggressive exponential wall and the dense core separately
         for _ in range(10): opt_tips.zero_grad(); compute_loss(region="tips").backward(); opt_tips.step()
         for _ in range(10): opt_plateau.zero_grad(); compute_loss(region="plateau").backward(); opt_plateau.step()
-        for _ in range(10): opt_tips.zero_grad(); compute_loss(region="tips").backward(); opt_tips.step()
+
+        # --- PHASE 2: GLOBAL AWARENESS ---
+        # Remove the masks. Let them adjust to how their curves affect each other
+        for _ in range(10): opt_tips.zero_grad(); compute_loss(region="all").backward(); opt_tips.step()
+        for _ in range(10): opt_plateau.zero_grad(); compute_loss(region="all").backward(); opt_plateau.step()
+
+        # --- PHASE 3: FINAL JOINT POLISH ---
+        # Move all 4 parameters simultaneously to hit the mathematical floor
         for _ in range(10): opt_joint.zero_grad(); compute_loss(region="all").backward(); opt_joint.step()
 
+
+        
         # --- 3. THE EVALUATION STAGE ---
         with torch.no_grad():
             # 1. Generate the continuous polynomial curve
