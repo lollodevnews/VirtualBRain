@@ -132,8 +132,8 @@ def compress_vbr_v25_matrix(name, weight):
             test_points = [
                 (-2.5, 1.25), 
                 ( 2.5, 0.80), 
-                (-1.4, 2.40), 
-                (-1.1, 1.50), 
+                ( 0.4, 1.85), 
+                (-1.3, 1.50), 
                 ( 0.0, 1.00)
             ]
             for test_a, test_m in test_points:
