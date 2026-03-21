@@ -4,7 +4,7 @@
 ![VirtualBRain Architecture Diagram](diagram.png)
 
 > ⚠️ **IMPORTANT: THE BUILDER'S SHIELD**
-> There are many good intuitions here that are being explored, but don't treat this as "the truth". This is a highly experimental work in progress and, like every construction site, there are plenty of exposed sharp edges that will hurt you if you are not careful. Enjoy with awareness.
+> There are many potentially good intuitions here that are being actively explored, but don't treat this as "the truth". This is a highly experimental work in progress and, like every construction site, there are plenty of exposed sharp edges that will hurt you if you are not careful. Enjoy with awareness.
 
 ---
 
