@@ -1,7 +1,8 @@
 # VirtualBrain VBR: The Non-Linear Grid Search Engine (V34)
 **A Variable BitRate (VBR) bare-metal quantization framework.**
 
-> **THE EVOLUTION OF THIS PROJECT:** The journey started by wanting to move away from brute-force algorithms, which initially led us to a simple 1-layer neural network that yielded minimal compression. We then implemented a 4-layer neural network using predetermined anchor points. With this latest iteration, we move away from fixed points entirely into a Monte Carlo simulation, where the random scatter of points combined with gradient descent and localized grid-search optimizations offers the absolute best compression performance so far.
+> **THE EVOLUTION OF THIS PROJECT:**
+The journey started by wanting to move away from brute-force compression algorithms, which initially led us to a simple 1-layer neural network that yielded minimal compression. We then implemented a 4-layer neural network using predetermined anchor points. With this latest iteration, we move away from fixed points entirely into a Monte Carlo simulation, where the random scatter of points combined with gradient descent and localized grid-search optimizations offers the absolute best compression performance so far.
 
 ---
 
