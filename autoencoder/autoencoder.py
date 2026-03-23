@@ -8,12 +8,12 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM
 
 print("==========================================")
-print(" VIRTUALBRAIN V30: THE NEURAL AUTOENCODER ")
+print(" VIRTUALBRAIN V34: THE NEURAL AUTOENCODER ")
 print("==========================================")
 
 # --- CONFIGURATION ---
 MODEL_ID = os.path.expanduser("~/models/quant/qwen25_7b")
-OUTPUT_DIR = os.path.expanduser("~/models/quant/vbr_qwen25_v30")
+OUTPUT_DIR = os.path.expanduser("~/models/quant/vbr_qwen25_v34")
 
 MAX_ENERGY_ERROR_EXPERT    = 0.01      
 MAX_ENERGY_ERROR_ATTENTION = 0.0005    
@@ -24,10 +24,10 @@ LENIENCY_MAP_EXPERT = {2: 4.0, 3: 2.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
 os.makedirs(OUTPUT_DIR, exist_ok=True)
   
 # ==========================================
-# THE V30 NEURAL COMPRESSOR
+# THE V34 NEURAL COMPRESSOR (Zero Dust Anchor)
 # ==========================================
 
-def compress_vbr_v30_matrix(name, weight):
+def compress_vbr_v34_matrix(name, weight):
     device = weight.device
     out_features, in_features = weight.shape
     weight_flat = weight.detach().view(out_features, -1).to(device)
@@ -38,14 +38,13 @@ def compress_vbr_v30_matrix(name, weight):
     raw_max = M.max(dim=1)[0].clamp(min=1e-5)
     row_energy = (M ** 2).sum(dim=1)
 
-    # 2. Master Tracking Tensors
+    # 2. Master Tracking Tensors (Dust Anchors Removed!)
     best_D = torch.zeros(out_features, dtype=torch.uint8, device=device)
     best_ints = torch.zeros_like(M, dtype=torch.int32)
     alpha_a = torch.zeros(out_features, dtype=torch.float16, device=device)
     alpha_b = torch.zeros(out_features, dtype=torch.float16, device=device)
     power_m = torch.ones(out_features, dtype=torch.float16, device=device)
     power_n = torch.ones(out_features, dtype=torch.float16, device=device)
-    dust_anchors = torch.zeros(out_features, dtype=torch.float16, device=device)
     vbr_scales = torch.zeros(out_features, dtype=torch.float16, device=device)
 
     active_indices = torch.arange(out_features, device=device)
@@ -68,8 +67,16 @@ def compress_vbr_v30_matrix(name, weight):
 
         mag_bits = current_D - 1
         K_bins = 2 ** mag_bits
-        divisor = float(K_bins - 1)
-        norm_indices = torch.arange(K_bins, device=device).float() / divisor
+        
+        # --- V34 SYMMETRIC NO-ZERO LOGIC ---
+        if current_D <= 4:
+            # Shifted magnitudes: 1 to K_bins
+            divisor = float(K_bins)
+            norm_indices = torch.arange(1, K_bins + 1, device=device).float() / divisor
+        else:
+            # Standard zero-inclusive: 0 to K_bins-1
+            divisor = float(K_bins - 1)
+            norm_indices = torch.arange(K_bins, device=device).float() / divisor
 
         current_threshold = threshold_chunk * leniency_map[current_D]
         if current_D == 8:
@@ -87,20 +94,9 @@ def compress_vbr_v30_matrix(name, weight):
         quantile_indices = torch.linspace(0, M_untested.shape[1] - 1, steps=K_bins, device=device).long()
         oracle_targets = M_sorted[:, quantile_indices]
 
-        # Analytical Dust Engine
-        if mag_bits > 3:
-            active_dust = torch.zeros_like(raw_max_chunk)
-        else:
-            dynamic_dust_ratio = 1.0 / K_bins
-            dust_budget = chunk_energy * (current_threshold * dynamic_dust_ratio)
-            cum_energy = torch.cumsum(M_sorted.pow(2), dim=1) 
-            counts = torch.searchsorted(cum_energy, dust_budget.unsqueeze(1)).squeeze(1)
-            anchor_indices = (counts - 1).clamp(min=0)
-            active_dust = torch.gather(M_sorted, 1, anchor_indices.unsqueeze(1)).squeeze(1)
-            
-        active_scale = raw_max_chunk - active_dust
+        # Dust Anchor Engine Removed. Scale is simply the raw max.
+        active_scale = raw_max_chunk.clone()
         safe_norm = torch.clamp(norm_indices, min=1e-4).unsqueeze(0)
-        #safe_norm = norm_indices.unsqueeze(0) + 1e-5
         batch_len = M_untested.shape[0]
 
         # ==========================================
@@ -111,7 +107,6 @@ def compress_vbr_v30_matrix(name, weight):
         with torch.no_grad():
             # --- HELPER: Memory-Safe Grid Evaluator ---
             def evaluate_grid(a_guesses, b_guesses, m_guesses, n_guesses):
-                """ Takes [batch_len, num_guesses] and returns the best parameters per row """
                 num_g = a_guesses.shape[1]
                 b_a, b_b, b_m, b_n = [], [], [], []
                 
@@ -119,7 +114,7 @@ def compress_vbr_v30_matrix(name, weight):
                 b_c = b_guesses.unsqueeze(2)
                 m_c = m_guesses.unsqueeze(2)
                 n_c = n_guesses.unsqueeze(2)
-                norm_c = safe_norm.unsqueeze(0) # [1, 128]
+                norm_c = safe_norm.unsqueeze(0) 
                 
                 for i in range(0, batch_len, chunk_size_mc):
                     a_chunk = a_c[i:i+chunk_size_mc]
@@ -134,10 +129,9 @@ def compress_vbr_v30_matrix(name, weight):
                     curve = torch.clamp(curve, 0.0, 1.0)
                     
                     scale_chunk = active_scale[i:i+chunk_size_mc].view(-1, 1, 1)
-                    dust_chunk = active_dust[i:i+chunk_size_mc].view(-1, 1, 1)
                     oracle_chunk = oracle_targets[i:i+chunk_size_mc].unsqueeze(1).expand(-1, num_g, -1)
                     
-                    bin_chunk = (curve * scale_chunk) + dust_chunk
+                    bin_chunk = curve * scale_chunk
                     
                     # FULL SPECTRUM MSE
                     mse = F.mse_loss(bin_chunk.to(oracle_chunk.dtype), oracle_chunk, reduction='none').mean(dim=2)
@@ -156,8 +150,8 @@ def compress_vbr_v30_matrix(name, weight):
             N = 1024
             guess_b = torch.empty(1, N, device=device).uniform_(0.0, 1.0).expand(batch_len, -1)
             guess_n = torch.empty(1, N, device=device).uniform_(2.0, 25.0).expand(batch_len, -1)
-            guess_a = torch.zeros(1, N, device=device).expand(batch_len, -1) # a=0
-            guess_m = torch.ones(1, N, device=device).expand(batch_len, -1)  # m=1
+            guess_a = torch.zeros(1, N, device=device).expand(batch_len, -1) 
+            guess_m = torch.ones(1, N, device=device).expand(batch_len, -1)  
             
             best_a, best_b, best_m, best_n = evaluate_grid(guess_a, guess_b, guess_m, guess_n)
 
@@ -178,8 +172,8 @@ def compress_vbr_v30_matrix(name, weight):
             # --- STAGE 3: RE-EVALUATE (b, n) ---
             guess_b = torch.empty(1, N, device=device).uniform_(0.0, 1.0).expand(batch_len, -1)
             guess_n = torch.empty(1, N, device=device).uniform_(2.0, 25.0).expand(batch_len, -1)
-            guess_a = best_a.unsqueeze(1).expand(-1, N) # Locked from Stage 2
-            guess_m = best_m.unsqueeze(1).expand(-1, N) # Locked from Stage 2
+            guess_a = best_a.unsqueeze(1).expand(-1, N) 
+            guess_m = best_m.unsqueeze(1).expand(-1, N) 
             
             best_a, best_b, best_m, best_n = evaluate_grid(guess_a, guess_b, guess_m, guess_n)
 
@@ -199,43 +193,32 @@ def compress_vbr_v30_matrix(name, weight):
             # --- STAGE 5: MICRO-ADJUSTMENTS (Joint Jitter) ---
             N_micro = 512
             
-            # 1. Generate the Jitters using N_micro (512)
             jit_k = torch.empty(1, N_micro, device=device).uniform_(-0.2, 0.2)
             jit_b = torch.empty(1, N_micro, device=device).uniform_(-0.05, 0.05)
             jit_n = torch.empty(1, N_micro, device=device).uniform_(-0.5, 0.5)
 
-            # 2. Dynamic m jitter using N_micro (512)
             base_jit_m = torch.empty(1, N_micro, device=device).uniform_(-1.0, 1.0)
             m_scale = torch.where(best_m > 1.0, 0.5, 0.05).unsqueeze(1)
             jit_m = base_jit_m * m_scale
 
-            # 3. Apply jitters and clamp
             guess_m = torch.clamp(best_m.unsqueeze(1) + jit_m, 0.15, 8.0)
-            
-            # SAFEGUARD: Prevent Division by Zero if m lands exactly on 1.0
             guess_m = torch.where(guess_m == 1.0, 1.001, guess_m)
 
-            # 4. Reconstruct current best_k to apply the jitter
             current_best_k = best_a * (1.0 - best_m)
             guess_k = current_best_k.unsqueeze(1) + jit_k
             
-            # 5. Final parameter calculations
             guess_a = guess_k / (1.0 - guess_m)
             guess_b = torch.clamp(best_b.unsqueeze(1) + jit_b, 0.0, 1.0)
             guess_n = torch.clamp(best_n.unsqueeze(1) + jit_n, 1.0, 25.0)
 
             best_a, best_b, best_m, best_n = evaluate_grid(guess_a, guess_b, guess_m, guess_n)
 
-        # --- END OF OPTIMIZATION ---
-        # The Evaluation Stage uses best_a, best_b, best_m, best_n from here!
-
         # --- 3. THE EVALUATION STAGE ---
         with torch.no_grad():
-            # Use the HARVESTED WINNERS from the Top-16 Beam Search!
             a_f = best_a.detach().clone().flatten()
             b_f = torch.clamp(best_b.detach(), 0.0, 1.0).clone().flatten()
             m_f = torch.clamp(best_m.detach(), 0.1, 4.0).clone().flatten()
-            n_f = torch.clamp(best_n.detach(), 1.0, 25.0).clone().flatten() # Matched to 25.0 bound
+            n_f = torch.clamp(best_n.detach(), 1.0, 25.0).clone().flatten()
 
             a_c = a_f.unsqueeze(1)
             b_c = b_f.unsqueeze(1)
@@ -246,7 +229,7 @@ def compress_vbr_v30_matrix(name, weight):
             curve = linear + a_c * (safe_norm ** m_c) + b_c * (safe_norm ** n_c)
             curve = torch.clamp(curve, 0.0, 1.0)
 
-            lut = (curve * active_scale.unsqueeze(1)) + active_dust.unsqueeze(1)
+            lut = curve * active_scale.unsqueeze(1)
             
             closest_ints_global = torch.zeros_like(M_untested, dtype=torch.int16) 
             error_energy = torch.zeros(M_untested.shape[0], device=device, dtype=torch.float32)
@@ -286,7 +269,6 @@ def compress_vbr_v30_matrix(name, weight):
             alpha_b[global_passed_indices] = b_f[passed_curves].half()
             power_m[global_passed_indices] = m_f[passed_curves].half()
             power_n[global_passed_indices] = n_f[passed_curves].half()
-            dust_anchors[global_passed_indices] = active_dust[passed_curves].half()
             vbr_scales[global_passed_indices] = active_scale[passed_curves].half()
             
             unsolved_mask = ~passed_curves
@@ -303,7 +285,6 @@ def compress_vbr_v30_matrix(name, weight):
     offsets = []
     current_offset = 0
     
-    # Assert sanity check for the 32-weight Superblock
     assert in_features % 32 == 0, "in_features must be cleanly divisible by 32 for Compound Superblocks."
     
     for i in range(out_features):
@@ -314,14 +295,12 @@ def compress_vbr_v30_matrix(name, weight):
             
         mag_bits = final_d - 1
         
-        # Squeeze the entire row into Superblocks of 32 weights
         r_ints = best_ints[i].to(torch.uint8).view(-1, 32)
         r_signs = signs[i].to(torch.uint8).view(-1, 32)
         
         blocks = []
         current_shift = 0
         
-        # 1. Extract 4-bit Base Chunk (if magnitude has at least 4 bits)
         if mag_bits >= 4:
             b4 = (r_ints >> current_shift) & 0x0F
             pack4 = b4[:, 0::2] | (b4[:, 1::2] << 4)
@@ -329,7 +308,6 @@ def compress_vbr_v30_matrix(name, weight):
             current_shift += 4
             mag_bits -= 4
             
-        # 2. Extract 2-bit Residual Chunk (if magnitude has at least 2 bits left)
         if mag_bits >= 2:
             b2 = (r_ints >> current_shift) & 0x03
             pack2 = b2[:, 0::4] | (b2[:, 1::4] << 2) | (b2[:, 2::4] << 4) | (b2[:, 3::4] << 6)
@@ -337,19 +315,16 @@ def compress_vbr_v30_matrix(name, weight):
             current_shift += 2
             mag_bits -= 2
             
-        # 3. Extract 1-bit Residual Chunk (if magnitude has exactly 1 bit left)
         if mag_bits == 1:
             b1 = (r_ints >> current_shift) & 0x01
             pack1 = (b1[:, 0::8] | (b1[:, 1::8] << 1) | (b1[:, 2::8] << 2) | (b1[:, 3::8] << 3) |
                      (b1[:, 4::8] << 4) | (b1[:, 5::8] << 5) | (b1[:, 6::8] << 6) | (b1[:, 7::8] << 7))
             blocks.append(pack1)
             
-        # 4. Extract 1-bit Sign Chunk (ALWAYS PRESENT)
         pack_sign = (r_signs[:, 0::8] | (r_signs[:, 1::8] << 1) | (r_signs[:, 2::8] << 2) | (r_signs[:, 3::8] << 3) |
                      (r_signs[:, 4::8] << 4) | (r_signs[:, 5::8] << 5) | (r_signs[:, 6::8] << 6) | (r_signs[:, 7::8] << 7))
         blocks.append(pack_sign)
         
-        # 5. Compound Fusion (Creates the perfect Cache-Local Blocks)
         packed_row = torch.cat(blocks, dim=1).flatten()
         
         packed_bytes.append(packed_row)
@@ -358,7 +333,13 @@ def compress_vbr_v30_matrix(name, weight):
 
     vbr_data = torch.cat(packed_bytes)
     vbr_offsets = torch.tensor(offsets, dtype=torch.int32)
-    row_divisors = (2 ** (best_D.float() - 1)) - 1.0
+    
+    # --- V34 DIVISOR EXPORT UPDATE ---
+    # Q2/Q3/Q4 divide by (2^bits), Q6/Q8 divide by (2^bits - 1)
+    mag_bits_tensor = best_D.float() - 1.0
+    row_divisors = torch.where(best_D <= 4, 
+                               2 ** mag_bits_tensor, 
+                               (2 ** mag_bits_tensor) - 1.0)
     
     return {
         "is_vbr_compressed": True,
@@ -371,8 +352,8 @@ def compress_vbr_v30_matrix(name, weight):
         "alpha_a": alpha_a.cpu(),
         "alpha_b": alpha_b.cpu(),
         "power_m": power_m.cpu(),
-        "power_n": power_n.cpu(),
-        "dust_anchors": dust_anchors.cpu()
+        "power_n": power_n.cpu()
+        # dust_anchors is officially gone!
     }
 
 def main():
@@ -386,7 +367,6 @@ def main():
     
     model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float16, device_map="cpu")
     layer_names = [n for n, m in model.named_modules() if isinstance(m, torch.nn.Linear) and "lm_head" not in n]
-    #layer_names = [n for n, m in model.named_modules() if isinstance(m, torch.nn.Linear)]
     
     chunk_size = math.ceil(len(layer_names) / args.total_chunks)
     start_idx = args.chunk_idx * chunk_size
@@ -403,7 +383,7 @@ def main():
         pbar.set_description(f"GPU {args.gpu} | {short_name[:12]:<12}")
         
         weight = model.get_submodule(name).weight.to(DEVICE)
-        vbr_result = compress_vbr_v30_matrix(name, weight) 
+        vbr_result = compress_vbr_v34_matrix(name, weight) 
         
         if vbr_result is not None:
             if hasattr(model.get_submodule(name), "bias") and model.get_submodule(name).bias is not None:
