@@ -1,8 +1,8 @@
 # VirtualBrain VBR: The Non-Linear Grid Search Engine (V34)
 **A Variable BitRate (VBR) bare-metal quantization framework.**
 
-> **THE EVOLUTION OF THIS PROJECT:**
-The journey started by wanting to move away from brute-force compression algorithms, which initially led us to a simple 1-layer neural network that yielded minimal compression. We then implemented a 4-layer neural network using predetermined anchor points. With this latest iteration, we move away from fixed points entirely into a Monte Carlo simulation, where the random scatter of points combined with gradient descent and localized grid-search optimizations offers the absolute best compression performance so far.
+**THE EVOLUTION OF THIS PROJECT:** 
+The journey started by wanting to move away from brute-force algorithms, which initially led us to a simple 1-layer neural network that yielded minimal compression. We then implemented a 4-layer neural network using predetermined anchor points. With this latest iteration, we move away from fixed points entirely into a Monte Carlo simulation, where the random scatter of points combined with gradient descent and localized grid-search optimizations offers the absolute best compression performance so far.
 
 ---
 
@@ -48,21 +48,31 @@ To achieve true Pareto efficiency, the energy thresholds are highly modular and 
 
 ---
 
-## 5. The Hard Numbers (Qwen 2.5 7B)
+## 5. The Superblock Archive Format
+
+Earlier versions of VBR relied on a Transposed Bit-Planar layout. While mathematically sound, scattering bits across transposed arrays forced the GPU memory controller into non-coalesced reads, bottlenecking the C++ kernel.
+
+**V34 completely replaces transposed bits with the Superblock Formulation.**
+Instead of stripping bits into isolated planes, we pack the continuous variable-bitrate streams, their active scales, and their polynomial headers directly into perfectly aligned, contiguous memory blocks. 
+* **L1 Cache Saturation:** By formatting the archive into rigid superblocks, the hardware can execute wide, 16-byte vectorized loads (`float4` / `int4`), instantly saturating the GPU's memory bandwidth.
+* **Zero Pointer Chasing:** The bare-metal HIP kernel (not included here) can dynamically reconstructs fractional bitrates (3-bit, 5-bit, 8-bit) on the fly entirely within the GPU registers, without any warp divergence or nested memory lookups.
+
+---
+## 6. The Hard Numbers (Qwen 2.5 7B)
 
 Unlike standard repositories, we publish the exact mathematical degradation to prove the structural coherence of our flat file sizes. Benchmarked on an AMD Instinct MI50.
 
-| Architecture | Total File Size | Bits Per Weight | WikiText-2 Perplexity | Degradation | MI50 Inference Speed |
+| Architecture | Total File Size (`ls -lh`) | Bits Per Weight | WikiText-2 Perplexity | Degradation | MI50 Inference Speed |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Base (FP16)** | 14.0 GB | 16.0 bpw | ~6.1400 | - | - |
-| **V28 (AdamW)** | 4.80 GB | ~5.48 bpw | 6.4656 | +0.3256 | - |
-| **V34 (Grid Search)** | **5.06 GB** | **~5.80 bpw** | **6.2285** | **+0.0885** | **22.83 T/s** |
+| **V28 (AdamW)** | 4.8 GB | ~5.48 bpw | 6.4656 | +0.3256 | - |
+| **V34 (Grid Search)** | **4.9 GB** | **~5.60 bpw** | **6.2285** | **+0.0885** | **22.83 T/s** |
 
-*Note: The 5.06 GB footprint is the strict, effective flat file size. It encompasses compressed matrices (`compressed_01.pt` - `compressed_04.pt`), all polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
+*Note: The 4.9 GB footprint is the strict, effective flat file size reported by the OS. It encompasses compressed matrices (`compressed_01.pt` - `compressed_04.pt`), all polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
 
 ---
 
-## 6. How to Run the Compressor
+## 7. How to Run the Compressor
 
 ### Step 1: Compile the Model (The Autoencoder)
 Because VBR evaluates massive mathematical grids, the compression is split into chunks to protect GPU memory. Run the Autoencoder iteratively across your available GPUs:
@@ -75,7 +85,7 @@ python3 autoencoder.py --chunk_idx 3 --gpu 3 --total_chunks 4
 ```
 
 ### Step 2: Inference & Verification
-Run the bare-metal HIP engine to verify continuous generation, or launch the sliding-window Perplexity benchmark to measure the exact mathematical degradation:
+Run the inference.py script (or your custom bare-metal HIP engine) to verify continuous generation, or launch the sliding-window Perplexity benchmark to measure the exact mathematical degradation:
 
 ```bash
 # Test generation and Tokens/Sec speed
