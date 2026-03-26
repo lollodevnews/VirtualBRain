@@ -39,19 +39,28 @@ from transformers import AutoModelForCausalLM
 MODEL_ID = os.path.expanduser("~/models/quant/qwen25_7b") #"meta-llama/Llama-2-7b-hf" # <-- Update to your exact model path
 OUTPUT_DIR = "./quant_qwen"
 
-# VBR TOLERANCE SETTINGS
+# VBR TOLERANCE SETTINGS FIDELITY RUN
+C_MAX = 4
 ATTENTION_ERROR = 0.02  # Strict tolerance for Q, K, V, O
 EXPERT_ERROR    = 0.08  # Loose tolerance for FFN Gate, Up, Down
 DEFAULT_ERROR   = 0.01
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-C_MAX = 4
-
 
 LENIENCY_MASK_DEFAULT =  {2: 1.0, 3: 1.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
 LENIENCY_MASK_EXPERT  =  {2: 2.0, 3: 1.5, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
 LENIENCY_MASK_ATTN    =  {2: 2.0, 3: 1.5, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
 
+'''
+# VBR TOLERANCE SETTINGS EXTREME COMPRESSION RUN
+C_MAX = 4
+ATTENTION_ERROR = 0.04  # Strict tolerance for Q, K, V, O
+EXPERT_ERROR    = 0.17  # Loose tolerance for FFN Gate, Up, Down
+DEFAULT_ERROR   = 0.01
+
+LENIENCY_MASK_DEFAULT =  {2: 1.0, 3: 1.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+LENIENCY_MASK_EXPERT  =  {2: 1.5, 3: 1.3, 4: 1.1, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+LENIENCY_MASK_ATTN    =  {2: 1.5, 3: 1.3, 4: 1.1, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+'''
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 REFINEMENT_AREA_1 = 0.10  # 10% of the global range
 REFINEMENT_AREA_2 = 0.04  # 3% of the global range
@@ -59,8 +68,6 @@ REFINEMENT_AREA_2 = 0.04  # 3% of the global range
 N_stage0 = 2048
 N_stage1 = 2048
 N_stage2 = 2048
-
-
 
 @torch.no_grad()
 def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map):
