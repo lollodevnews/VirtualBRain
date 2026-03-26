@@ -33,8 +33,8 @@ We publish the exact mathematical degradation to prove the structural coherence 
 | Architecture | Total File Size (`ls -lh`) | Bits Per Weight | WikiText-2 Perplexity | Degradation |
 | :--- | :--- | :--- | :--- | :--- |
 | **Base (FP16)** | 14.0 GB | 16.00 bpw | 6.1050 | - |
-| **V35 (High Fidelity)**| **4.00 GB** | **~4.57 bpw** | **6.2631** | **+0.1581** |
-| **V35 (Extreme VBR)** | **3.56 GB** | **~4.06 bpw** | **6.4080** | **+0.3030** |
+| **V35 (High Fidelity)**| **4.10 GB** | **~4.6 bpw** | **6.1752** | **+0.0702** |
+| **V35 (Extreme VBR)** | **3.30 GB** | **~3.90 bpw** | **6.4151** | **+0.3101** |
 
 *Note: The footprints reported above represent the strict, effective flat file size on disk. They encompass all compressed matrices, polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
 
