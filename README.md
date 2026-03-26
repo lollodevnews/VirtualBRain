@@ -1,5 +1,5 @@
 # VirtualBrain (VBR)
-**The Non-Linear Quantization Engine: Modulating Noise, Not Bits.**
+**The Non-Linear Quantization Engine: Modulating Noise, Not Bits (V35).**
 
 ![VirtualBRain Architecture Diagram](diagram.png)
 
@@ -12,28 +12,29 @@
 
 The open-source quantization community relies on a shared deception: **Group-Wise Scaling**. To make standard "4-bit" models (like AWQ or GGUF) retain their intelligence, they chop rows into tiny 64-weight blocks and inject gigabytes of hidden FP16 metadata to prop up the math. 
 
-**VirtualBrain VBR abandons group-wise scaling entirely.** Instead of forcing a global bit-depth and patching the damage with metadata, VBR utilizes a custom Autoencoder powered by a **Monte Carlo Alternating Grid Search**. It evaluates the physical weight distribution of an entire row and compresses it using a continuous, non-linear polynomial S-Curve.
+**VirtualBrain VBR abandons group-wise scaling entirely.** Instead of forcing a global bit-depth and patching the damage with metadata, VBR utilizes a custom Autoencoder powered by a **Zero-Memory Algebraic CDF Shortcut**. It evaluates the physical weight distribution of an entire row and compresses it using a continuous, non-linear Desmos Topology (a, c, m).
 
-### 1. Modulating Noise, Not Bits
-VBR actively evaluates the Mean Squared Error (MSE) of every single row and dynamically assigns it a bit-depth purely based on its noise tolerance. 
-* **Attention Tensors** are hyper-sensitive. The engine enforces a strict **0.05%** maximum energy loss threshold to protect context recall.
-* **Expert / MLP Tensors** are robust. The engine applies a relaxed **1.0%** error allowance, crushing them down to save massive amounts of VRAM without sacrificing intelligence.
+### 1. Modulating Noise, Not Bits (L1 Energy Routing)
+VBR actively evaluates the **Normalized L1 Energy** (the pure physical mass) of every single row and dynamically assigns it a bit-depth purely based on its noise tolerance, completely eliminating Mean Squared Error (MSE) illusions. 
+* **Attention Tensors** are hyper-sensitive. The engine enforces a strict **~4%** maximum L1 energy shift to protect context recall, naturally retaining higher bitrates.
+* **Expert / MLP Tensors** are massive but robust. The engine applies a relaxed **~8% to 12.5%** L1 allowance, crushing them down to 4-bit and 5-bit arrays to save massive amounts of VRAM without sacrificing intelligence.
 
-### 2. The Superblock Archive
-Instead of scattered bit-planes, VBR packs its continuous variable-bitrate streams into perfectly aligned, contiguous memory **Superblocks**. This allows the bare-metal C++ kernel to execute wide, 16-byte vectorized loads (`float4`), instantly saturating the GPU's L1 cache and hitting ~23 Tokens/Sec on older AMD MI50 hardware without a single warp divergence.
+### 2. Fused SWAR & The Superblock Archive
+Instead of scattered bit-planes, VBR mathematically fuses the Sign Bit directly into the Most Significant Bit (MSB) during compilation. It then packs its continuous variable-bitrate streams into perfectly aligned, contiguous memory **Superblocks**. This allows bare-metal C++ and vectorized Python kernels to execute wide, zero-waste loads, instantly saturating the GPU's memory bandwidth without a single warp divergence.
 
 ---
 
 ## 🏆 The Hard Numbers (Qwen 2.5 7B)
 
-We publish the exact mathematical degradation to prove the structural coherence of our flat file sizes. By using continuous polynomial curves instead of fixed group-wise grids, V34 achieves near-lossless intelligence compression. 
+We publish the exact mathematical degradation to prove the structural coherence of our flat file sizes. By using continuous polynomial curves and exact Voronoi thresholds instead of fixed group-wise grids, V35 achieves near-lossless intelligence compression. 
 
-| Architecture | Total File Size (`ls -lh`) | Bits Per Weight | WikiText-2 Perplexity | Degradation | MI50 Inference Speed |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Base (FP16)** | 14.0 GB | 16.0 bpw | ~6.1400 | - | - |
-| **V34 (Grid Search)** | **4.9 GB** | **~5.60 bpw** | **6.2285** | **+0.0885** | **22.83 T/s** |
+| Architecture | Total File Size (`ls -lh`) | Bits Per Weight | WikiText-2 Perplexity | Degradation |
+| :--- | :--- | :--- | :--- | :--- |
+| **Base (FP16)** | 14.0 GB | 16.00 bpw | 6.1050 | - |
+| **V35 (High Fidelity)**| **4.00 GB** | **~4.57 bpw** | **6.2631** | **+0.1581** |
+| **V35 (Extreme VBR)** | **3.56 GB** | **~4.06 bpw** | **6.4080** | **+0.3030** |
 
-*Note: The 4.9 GB footprint is the strict, effective flat file size reported by the OS. It encompasses all compressed matrices, polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
+*Note: The footprints reported above represent the strict, effective flat file size on disk. They encompass all compressed matrices, polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
 
 ---
 
@@ -41,7 +42,7 @@ We publish the exact mathematical degradation to prove the structural coherence 
 
 VirtualBrain is structured as a monorepo. Please navigate to the specific module you wish to explore:
 
-* **[`📁 autoencoder/`](./autoencoder/)** — **[CURRENT STATE OF THE ART]** Contains the V34 Non-Linear Autoencoder and the Python Inference Emulator. **Read the sub-README here for the deep-dive into the $(a, b, m, n)$ polynomial math, the $k$ substitution, and the grid-search mechanics.**
+* **[`📁 autoencoder/`](./autoencoder/)** — **[CURRENT STATE OF THE ART]** Contains the V35 Algebraic CDF Autoencoder and the Python Inference Emulator. **Read the sub-README here for the deep-dive into the Desmos Topology (a, c, m), the Prefix-Sum shortcut, and the L1 Energy routing mechanics.**
 * **[`📁 theory/`](./Theory/)** — Contains the core physics philosophy. Explores how the Transformer maps to Quantum Superposition, Wave-Collapse (Decoherence), and zero-point energy, complete with a QPU Emulator script.
 * **[`📁 qwen1.5_0.5b/`](./qwen1.5_0.5b/)** — **[ARCHIVE]** The historical "Phase 4" proof of concept. A rigid 5-bit grid implementation that first proved the viability of Signed-Magnitude VBR logic. 
 * **`📁 engine_hip/`** — **[WIP]** The bare-metal C++ AMD/ROCm Soft-FPGA inference kernel designed to natively ingest Superblocks.
@@ -52,7 +53,7 @@ VirtualBrain is structured as a monorepo. Please navigate to the specific module
 
 VirtualBrain is not just a quantizer; it is the foundation for a non-sequential, Turing-complete Neural CPU. Our active research pipeline includes:
 
-* **Bare-Metal GPU Fusion (HIP/Triton):** Fusing the continuous polynomial S-Curve evaluation directly into the Matrix Multiplication SRAM steps to achieve native FP16 token throughput with an n-bit memory footprint.
+* **Bare-Metal GPU Fusion (HIP/Triton):** Fusing the continuous polynomial curve evaluation directly into the Matrix Multiplication SRAM steps to achieve native FP16 token throughput with an n-bit memory footprint.
 * **Mixed-Precision MoE Tournaments:** Dynamically assigning 1-bit to 4-bit divisors per-row for Mixture of Experts (like Mixtral), physically collapsing cold expert blocks while preserving high precision for chaotic logic hubs.
 * **Neural Turing Execution (LISP Routing):** Transitioning from a sequential layer executor to a dynamic `while` loop, allowing the matrix to output a 32-bit integer pointer to physically address the next required expert matrix in VRAM.
 * **Quantum Emulation:** Leveraging the VBR architecture's mapping to high-dimensional Hilbert spaces to execute logic gates that mimic quantum search algorithms on classical deterministic silicon (see **[`Theory/qpu_emulator`](./Theory/qpu_emulator.py)**).
