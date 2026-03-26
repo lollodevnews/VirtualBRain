@@ -1,7 +1,43 @@
 # VirtualBrain (VBR)
 **The Non-Linear Quantization Engine: Modulating Noise, Not Bits (V35).**
 
-![VirtualBRain Architecture Diagram](diagram.png)
+graph TD
+    subgraph Phase 1: FP16 Ingestion
+        A[Raw FP16 Weights] --> B[Row-Wise Extraction]
+        B --> C[Calculate Row Scale & Normalize to 0.0 - 1.0]
+    end
+
+    subgraph Phase 2: The V35 Autoencoder
+        C --> D[Sort Weights & Build Zero-Memory CDF]
+        D --> E[Monte Carlo Grid Search: Desmos a, c, m]
+        E --> F[Algebraic L1 Energy Evaluation]
+        F --> G{The Pareto Sieve}
+        G -- Robust FFN/MLP --> H[Assign 3-bit / 4-bit]
+        G -- Sensitive Attention --> I[Assign 5-bit / 6-bit]
+    end
+
+    subgraph Phase 3: Fused SWAR Packing
+        H & I --> J[Map to Closest Voronoi Bins]
+        J --> K[Fuse Sign Bit into MSB]
+        K --> L[Pack into Contiguous VBR Superblocks]
+        L --> M[(V35 Compressed .pt Archive)]
+    end
+
+    subgraph Phase 4: Native Inference Reconstruction
+        M --> N[Vectorized SWAR Unpack]
+        N --> O[Evaluate Desmos Topology Curve]
+        O --> P[Apply Row Scale & Fused Sign]
+        P --> Q[Reconstructed FP16 Matrix]
+        Q --> R[Hardware MatMul / Text Generation]
+    end
+
+    %% Styling
+    style A fill:#1e1e1e,stroke:#fff,stroke-width:2px,color:#fff
+    style M fill:#8b0000,stroke:#fff,stroke-width:2px,color:#fff
+    style Q fill:#004d00,stroke:#fff,stroke-width:2px,color:#fff
+    style G fill:#b8860b,stroke:#fff,stroke-width:2px,color:#fff
+
+**Interactive Desmos Topology Graph:** [Play with the V35 Curve Here](https://www.desmos.com/calculator/jwadm38ufo)
 
 > ⚠️ **IMPORTANT: THE BUILDER'S SHIELD**
 > There are many potentially good intuitions here that are being actively explored, but don't treat this as "the truth". This is a highly experimental work in progress and, like every construction site, there are plenty of exposed sharp edges that will hurt you if you are not careful. Enjoy with awareness.
