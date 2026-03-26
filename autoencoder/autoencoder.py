@@ -41,7 +41,7 @@ OUTPUT_DIR = "./quant_qwen"
 
 # VBR TOLERANCE SETTINGS
 ATTENTION_ERROR = 0.02  # Strict tolerance for Q, K, V, O
-EXPERT_ERROR    = 0.11  # Loose tolerance for FFN Gate, Up, Down
+EXPERT_ERROR    = 0.08  # Loose tolerance for FFN Gate, Up, Down
 DEFAULT_ERROR   = 0.01
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -54,11 +54,13 @@ LENIENCY_MASK_ATTN    =  {2: 2.0, 3: 1.5, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0
 
 
 REFINEMENT_AREA_1 = 0.10  # 10% of the global range
-REFINEMENT_AREA_2 = 0.03  # 3% of the global range
+REFINEMENT_AREA_2 = 0.04  # 3% of the global range
 
 N_stage0 = 2048
-N_stage1 = 1024
-N_stage2 = 1024
+N_stage1 = 2048
+N_stage2 = 2048
+
+
 
 @torch.no_grad()
 def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map):
@@ -273,8 +275,8 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         threshold = max_energy_error * leniency_map.get(current_D, 1.0)
         pass_mask = best_error <= threshold
 
-        if current_D == 4 and "gate" in name:
-            print(f"\n[X-RAY] {name} | 4-Bit Mean L1 Error: {best_error.mean().item():.4f} | Target: {threshold:.4f}")
+        if current_D == 5 and "gate" in name:
+            print(f"\n[X-RAY] {name} | 5-Bit Mean L1 Error: {best_error.mean().item():.4f} | Target: {threshold:.4f}")
 
         if pass_mask.any():
             passed_global_indices = active_indices[pass_mask]
@@ -292,7 +294,7 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
             link_factor = 1.0 + (1.0 / safe_denom)
             m_log = 0.5 * torch.log(win_w_m**2 + 1.0)
             m_raw = ((M_MAX /  link_factor) + 1.0) * m_log * link_factor
-            m_phys = torch.clamp(m_raw, 2.0, M_MAX)
+            m_phys = torch.clamp(m_raw, 0, M_MAX)
             
             final_a[passed_global_indices] = a_phys
             final_c[passed_global_indices] = c_phys
