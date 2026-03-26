@@ -74,7 +74,7 @@ Unlike standard repositories, we publish the exact mathematical degradation to p
 | **V28 (AdamW)** | 4.80 GB | ~5.48 bpw | 6.4656 | +0.3606 |
 | **V34 (Grid Search)** | 4.90 GB | ~5.60 bpw | 6.2285 | +0.1235 |
 | **V35 (High Fidelity)** | **4.10 GB** | **~4.60 bpw** | **6.1752** | **+0.0702** |
-| **V35 (Extreme VBR)** | **3.56 GB** | **~4.06 bpw** | **6.4080** | **+0.3030** |
+| **V35 (Extreme VBR)** | **3.3 GB** | **~3.90 bpw** | **6.4151** | **+0.3101** |
 
 *Note: The footprints reported above encompass all compressed matrices, polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
 
