@@ -40,13 +40,28 @@ MODEL_ID = os.path.expanduser("~/models/quant/qwen25_7b") #"meta-llama/Llama-2-7
 OUTPUT_DIR = "./quant_qwen"
 
 # VBR TOLERANCE SETTINGS
-ATTENTION_ERROR = 0.04  # Strict tolerance for Q, K, V, O
-EXPERT_ERROR    = 0.08  # Loose tolerance for FFN Gate, Up, Down
-
+ATTENTION_ERROR = 0.02  # Strict tolerance for Q, K, V, O
+EXPERT_ERROR    = 0.11  # Loose tolerance for FFN Gate, Up, Down
+DEFAULT_ERROR   = 0.01
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+C_MAX = 4
+
+
+LENIENCY_MASK_DEFAULT =  {2: 1.0, 3: 1.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+LENIENCY_MASK_EXPERT  =  {2: 2.0, 3: 1.5, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+LENIENCY_MASK_ATTN    =  {2: 2.0, 3: 1.5, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+
+
+REFINEMENT_AREA_1 = 0.10  # 10% of the global range
+REFINEMENT_AREA_2 = 0.03  # 3% of the global range
+
+N_stage0 = 2048
+N_stage1 = 1024
+N_stage2 = 1024
+
 @torch.no_grad()
-def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error=0.01, leniency_map=None):
+def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map):
     """
     V35 Compositional Variable Bitrate Quantizer (Pure Monte Carlo Edition)
     Features: Inverted Topology (m inside, c outside) & Continuous Linkage
@@ -55,7 +70,7 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error=0.01, leniency
     rows, cols = weight_tensor.shape
     
     if leniency_map is None:
-        leniency_map = {2: 1.0, 3: 1.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+        leniency_map = LENIENCY_MASK_DEFAULT
 
     # 1. Row-wise Absolute Max Scaling
     row_max = torch.max(torch.abs(weight_tensor), dim=1)[0].clamp(min=1e-8)
@@ -99,13 +114,8 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error=0.01, leniency
         scale_f32 = active_scale.to(torch.float32).unsqueeze(1) 
         energy_f32 = row_energy.to(torch.float32).unsqueeze(1)  
         
-        if current_D == 2:
-            base_bins = torch.tensor([0.20, 1.0], device=device, dtype=torch.float32)
-        elif current_D == 3:
-            base_bins = torch.tensor([0.25, 0.50, 0.75, 1.0], device=device, dtype=torch.float32)
-        else:
-            divisor = float(K_bins - 1)
-            base_bins = torch.arange(K_bins, device=device).float() / divisor
+        divisor = float(K_bins - 1)
+        base_bins = torch.arange(K_bins, device=device).float() / divisor
 
         # ==========================================
         # INLINE GRID EVALUATOR (THE CDF ALGEBRAIC SHORTCUT)
@@ -127,14 +137,14 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error=0.01, leniency
                 current_chunk_len = gw_a_chunk.shape[1]
                 
                 a_g = torch.tanh(gw_a_chunk) 
-                c_g = 3.0 * torch.sigmoid(gw_c_chunk) 
+                c_g = C_MAX * torch.sigmoid(gw_c_chunk) 
                 wm_g = gw_m_chunk
                 
                 # Linkage & Topology
                 safe_denom = torch.abs(a_g) + 0.001 
                 link_factor = 1.0 + (1.0 / safe_denom)
                 m_log = 0.5 * torch.log(wm_g**2 + 1.0)
-                m_g = torch.clamp(((M_MAX / 2.0) * link_factor + 1.0) * m_log * link_factor, 2.0, M_MAX)
+                m_g = torch.clamp(((M_MAX /  link_factor) + 1.0) * m_log * link_factor, 0, M_MAX)
                 
                 inner = (1.0 - a_g) * b + a_g * (b ** m_g)
                 warped = torch.clamp(inner, 1e-6, 1.0) ** c_g
@@ -216,13 +226,6 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error=0.01, leniency
         W_C_RANGE = W_C_MAX - W_C_MIN
         W_M_RANGE = W_M_MAX - W_M_MIN
 
-        REFINEMENT_AREA_1 = 0.10  # 10% of the global range
-        REFINEMENT_AREA_2 = 0.03  # 3% of the global range
-
-        N_stage0 = 2048
-        N_stage1 = 1024
-        N_stage2 = 1024
-
         safe_chunk = 32 if (rows * cols) <= 20_000_000 else 16
 
         # ==========================================
@@ -283,12 +286,12 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error=0.01, leniency
             win_w_m = best_w_m[pass_mask]
             
             a_phys = torch.tanh(win_w_a)
-            c_phys = 3.0 * torch.sigmoid(win_w_c)
+            c_phys = C_MAX * torch.sigmoid(win_w_c)
             
             safe_denom = torch.abs(a_phys) + 0.001 
             link_factor = 1.0 + (1.0 / safe_denom)
             m_log = 0.5 * torch.log(win_w_m**2 + 1.0)
-            m_raw = ((M_MAX / 2.0) * link_factor + 1.0) * m_log * link_factor
+            m_raw = ((M_MAX /  link_factor) + 1.0) * m_log * link_factor
             m_phys = torch.clamp(m_raw, 2.0, M_MAX)
             
             final_a[passed_global_indices] = a_phys
@@ -309,13 +312,8 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error=0.01, leniency
 
         K_bins = 2 ** (current_D - 1)
 
-        if current_D == 2:
-            base_bins = torch.tensor([0.20, 1.0], device=device, dtype=torch.float32)
-        elif current_D == 3:
-            base_bins = torch.tensor([0.25, 0.50, 0.75, 1.0], device=device, dtype=torch.float32)
-        else:
-            divisor = float(K_bins - 1)
-            base_bins = torch.arange(K_bins, device=device).float() / divisor
+        divisor = float(K_bins - 1)
+        base_bins = torch.arange(K_bins, device=device).float() / divisor
 
         r_a = final_a[mask].unsqueeze(1)
         r_c = final_c[mask].unsqueeze(1)
@@ -413,13 +411,16 @@ def main():
         # 1. Dynamic Error Routing
         if any(attn_type in name for attn_type in ["q_proj", "k_proj", "v_proj", "o_proj"]):
             layer_error = ATTENTION_ERROR
+            leniency_mask = LENIENCY_MASK_ATTN
         elif any(ffn_type in name for ffn_type in ["gate_proj", "up_proj", "down_proj"]):
             layer_error = EXPERT_ERROR
+            leniency_mask = LENIENCY_MASK_EXPERT
         else:
-            layer_error = 0.01  # Fallback for any other linear layers
+            layer_error = DEFAULT_ERROR  # Fallback for any other linear layers
+            leniency_mask = LENIENCY_MASK_DEFAULT
         
         # 2. Compress
-        vbr_result = compress_vbr_v35_matrix(name, weight, max_energy_error=layer_error) 
+        vbr_result = compress_vbr_v35_matrix(name, weight, layer_error, leniency_mask) 
         
         if vbr_result is not None:
             if hasattr(model.get_submodule(name), "bias") and model.get_submodule(name).bias is not None:
