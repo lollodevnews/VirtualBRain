@@ -39,7 +39,7 @@ from transformers import AutoModelForCausalLM
 MODEL_ID = os.path.expanduser("~/models/quant/qwen25_7b") #"meta-llama/Llama-2-7b-hf" # <-- Update to your exact model path
 OUTPUT_DIR = "./quant_qwen"
 
-# VBR TOLERANCE SETTINGS FIDELITY RUN
+# VBR TOLERANCE SETTINGS - FIDELITY RUN
 C_MAX = 4
 ATTENTION_ERROR = 0.02  # Strict tolerance for Q, K, V, O
 EXPERT_ERROR    = 0.08  # Loose tolerance for FFN Gate, Up, Down
@@ -50,7 +50,7 @@ LENIENCY_MASK_EXPERT  =  {2: 2.0, 3: 1.5, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0
 LENIENCY_MASK_ATTN    =  {2: 2.0, 3: 1.5, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
 
 '''
-# VBR TOLERANCE SETTINGS EXTREME COMPRESSION RUN
+# VBR TOLERANCE SETTINGS - EXTREME COMPRESSION RUN
 C_MAX = 4
 ATTENTION_ERROR = 0.04  # Strict tolerance for Q, K, V, O
 EXPERT_ERROR    = 0.17  # Loose tolerance for FFN Gate, Up, Down
