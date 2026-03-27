@@ -88,8 +88,8 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
     # 2. Output Tensors
     final_bitrates = torch.full((rows,), 8, dtype=torch.int8, device=device)
     final_a = torch.zeros(rows, dtype=torch.float32, device=device)
-    final_c = torch.zeros(rows, dtype=torch.float32, device=device)
-    final_m = torch.zeros(rows, dtype=torch.float32, device=device)
+    final_c = torch.ones(rows, dtype=torch.float32, device=device)
+    final_m = torch.ones(rows, dtype=torch.float32, device=device)
     
     active_indices = torch.arange(rows, device=device)
     
@@ -364,11 +364,14 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         D = int(final_bitrates[i].item())
         mag_bits = D - 1
         num_superblocks = in_features // 32
-        
+
         # Extract row magnitudes and signs, reshaping into superblocks of 32
         row_q = quantized_indices[i]
-        mag = row_q.abs().to(torch.int32).view(num_superblocks, 32)
-        sgn = (row_q < 0).to(torch.int32).view(num_superblocks, 32)
+        K_bins = 1 << mag_bits
+        
+        # PROPER V36 FUSED EXTRACTION
+        mag = (row_q % K_bins).to(torch.int32).view(num_superblocks, 32)
+        sgn = (row_q >= K_bins).to(torch.int32).view(num_superblocks, 32)
         
         superblocks_data = []
         
@@ -487,3 +490,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
