@@ -108,7 +108,7 @@ def dequantize_vbr_v36(weight_dict, device="cuda"):
         curve = inner ** c
         
         # EXACT C++ MATCH: If magnitude is 0, curve MUST be exactly 0.0
-        #curve = torch.where(mag_flat == 0, 0.0, curve)
+        curve = torch.where(mag_flat == 0, 0.0, curve)
         
         magnitudes = s * curve
         sign_flip = torch.where(signs == 1, -1.0, 1.0).float()
