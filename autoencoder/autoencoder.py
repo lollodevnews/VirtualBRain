@@ -148,15 +148,25 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
                 a_g = torch.tanh(gw_a_chunk) 
                 c_g = C_MAX * torch.sigmoid(gw_c_chunk) 
                 wm_g = gw_m_chunk
-                
+
                 # Linkage & Topology
                 safe_denom = torch.abs(a_g) + 0.001 
                 link_factor = 1.0 + (1.0 / safe_denom)
                 m_log = 0.5 * torch.log(wm_g**2 + 1.0)
                 m_g = torch.clamp(((M_MAX /  link_factor) + 1.0) * m_log * link_factor, 0, M_MAX)
                 
-                inner = (1.0 - a_g) * b + a_g * (b ** m_g)
-                warped = torch.clamp(inner, 1e-6, 1.0) ** c_g
+                # ==========================================
+                # NEW: Hardware-Safe Movable Zero Math
+                # ==========================================
+                safe_b = b + 1e-9 # Prevent NaN during 0^m
+                inner = (1.0 - a_g) * safe_b + a_g * (safe_b ** m_g)
+                warped_raw = inner ** c_g
+                
+                # Soft-Zero Threshold: If it's mathematical noise, crush it to true 0.0. 
+                # If it's a movable floor (like 0.125), let it survive!
+                warped = torch.where(warped_raw < 1e-4, 0.0, warped_raw)
+                warped = torch.clamp(warped, 0.0, 1.0)
+                
                 warped_sorted, _ = torch.sort(warped, dim=2) 
                 
                 # ==========================================
@@ -329,9 +339,13 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         r_m = final_m[mask].unsqueeze(1)
         r_norm = normalized_weights[mask]
 
-        inner = (1.0 - r_a) * base_bins.unsqueeze(0) + r_a * (base_bins.unsqueeze(0) ** r_m)
-        safe_inner_pack = torch.clamp(inner, 1e-6, 1.0)
-        warped_bins = torch.clamp(safe_inner_pack ** r_c, 0.0, 1.0)
+        # NEW: Hardware-Safe Movable Zero Math for Assignment
+        safe_base = base_bins.unsqueeze(0) + 1e-9
+        inner = (1.0 - r_a) * safe_base + r_a * (safe_base ** r_m)
+        warped_raw = inner ** r_c
+        
+        warped_bins = torch.where(warped_raw < 1e-4, 0.0, warped_raw)
+        warped_bins = torch.clamp(warped_bins, 0.0, 1.0)
 
         best_indices = torch.zeros_like(r_norm, dtype=torch.long)
         chunk_size_pack = 256
