@@ -1,150 +1,201 @@
-import torch
 import os
 import glob
 import gc
+import math
 from tqdm import tqdm
+
+# 1. HARDWARE LOCK (Must be at the absolute top for MI50)
+os.environ["TORCH_BLAS_PREFER_HIPBLASLT"] = "0"
+os.environ["HSA_ENABLE_SDMA"] = "0"
+
+import torch
+import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-print("====================================================")
-print(" VIRTUALBRAIN V35: PYTHON INFERENCE EMULATOR")
-print("====================================================")
-
-# Update these paths to match your local setup
-#MODEL_ID = "meta-llama/Llama-2-7b-hf"
+# 2. CONFIGURATION
+DEVICE = "cuda:0"
 MODEL_ID = os.path.expanduser("~/models/quant/qwen25_7b")
 COMPILED_DIR = "./quant_qwen"
-DEVICE = "cuda:0"
 
-def dequantize_vbr_matrix_v35(weight_dict, device="cuda"):
-    """ Natively unpacks the V35 SWAR Superblocks (Fully Vectorized) """
+# ==========================================
+# THE V36 DEQUANTIZER (CLEAN ROOM EDITION)
+# ==========================================
+def dequantize_vbr_v36(weight_dict, device="cuda"):
+    """
+    Decodes 4-2-1-1 Superblocks with Desmos Continuous Topology.
+    Mirrors autoencoder.py exactly with Hardware-Safe Clamping.
+    """
     out_features, in_features = weight_dict["original_shape"]
-    vbr_data = weight_dict["vbr_data"].to(device)
-    offsets = weight_dict["vbr_offsets"].to(device)
-    bitrates = weight_dict["bitrates"].to(device)
     
-    # V35 Math Parameters
-    param_a = weight_dict["param_a"].to(device).float()
-    param_c = weight_dict["param_c"].to(device).float()
-    param_m = weight_dict["param_m"].to(device).float()
-    row_max = weight_dict["row_max"].to(device).float()
+    # Cast to int32 words immediately
+    vbr_data_32 = weight_dict["vbr_data"].to(device).view(torch.int32)
+    offsets_32 = weight_dict["vbr_offsets"].to(device) // 4
+    headers = weight_dict["bitrates"].to(device).squeeze()    
     
-    decoded_weights = torch.zeros((out_features, in_features), dtype=torch.float16, device=device)
+    # Metadata parameters in FP32 for precision
+    scales = weight_dict["row_max"].to(device).float()      
+    alphas = weight_dict["param_a"].to(device).float()      
+    cs = weight_dict["param_c"].to(device).float()          
+    ms = weight_dict["param_m"].to(device).float()          
     
-    for current_D in range(2, 9):
-        mask = (bitrates == current_D)
+    recon_matrix = torch.empty((out_features, in_features), dtype=torch.float16, device=device)
+    num_sb = in_features // 32
+    
+    for D_val in range(2, 9): 
+        mask = (headers == D_val)
         if not mask.any(): continue
-        
-        row_idx = mask.nonzero().squeeze(-1)
-        num_rows = row_idx.shape[0]
-        
-        num_chunks = in_features // 8
-        row_bytes = num_chunks * current_D
-        
-        # --- VECTORIZED ROW FETCH ---
-        starts = offsets[row_idx].unsqueeze(1)
-        byte_offsets = torch.arange(row_bytes, device=device).unsqueeze(0)
-        indices = starts + byte_offsets
-        
-        raw_bytes = vbr_data[indices].to(torch.int32) 
-        blocks = raw_bytes.view(num_rows, num_chunks, current_D)
-        
-        idx_unpacked = torch.zeros((num_rows, num_chunks, 8), dtype=torch.int32, device=device)
-        
-        # 1. Unpack SWAR Chunks
-        for bit_idx in range(current_D):
-            byte_col = blocks[:, :, bit_idx]
-            for bit_pos in range(8):
-                bit_val = (byte_col >> bit_pos) & 1
-                idx_unpacked[:, :, bit_pos] |= (bit_val << bit_idx)
-                
-        idx_flat = idx_unpacked.view(num_rows, in_features)
-        
-        # --- V35 MAGNITUDE & SIGN RECOVERY ---
-        K_bins = 2 ** (current_D - 1)
-        is_negative = idx_flat >= K_bins
-        mag_idx = idx_flat % K_bins
-        
-        # 2. Rebuild Base Bins
-        if current_D == 2:
-            base_bins = torch.tensor([0.20, 1.0], device=device, dtype=torch.float32)
-        elif current_D == 3:
-            base_bins = torch.tensor([0.25, 0.50, 0.75, 1.0], device=device, dtype=torch.float32)
-        else:
-            divisor = float(K_bins - 1)
-            base_bins = torch.arange(K_bins, device=device).float() / divisor
             
-        # 3. Vectorized Topology Math
-        a = param_a[row_idx].unsqueeze(1)
-        c = param_c[row_idx].unsqueeze(1)
-        m = param_m[row_idx].unsqueeze(1)
-        b = base_bins.unsqueeze(0) 
+        row_indices = torch.nonzero(mask).squeeze(-1)
+        num_rows = row_indices.shape[0]
         
-        inner = (1.0 - a) * b + a * (b ** m)
-        warped = torch.clamp(inner, 1e-6, 1.0) ** c 
+        # Calculate words per superblock for this bitrate
+        mag_bits = D_val - 1
+        sb_words = 0
+        if mag_bits >= 4: sb_words += 4; mag_bits -= 4
+        if mag_bits >= 2: sb_words += 2; mag_bits -= 2
+        if mag_bits == 1: sb_words += 1
+        sb_words += 1 # Sign word
         
-        # 4. Gather Physical Bins
-        gathered = torch.gather(warped, 1, mag_idx.long()) 
+        row_word_len = num_sb * sb_words
+        starts = offsets_32[row_indices].unsqueeze(1)
+        steps = torch.arange(row_word_len, device=device).unsqueeze(0)
         
-        # 5. Apply Scale and Fused Sign
-        w = gathered * row_max[row_idx].unsqueeze(1)
-        w[is_negative] *= -1.0
+        # Vectorized gather of all superblock words for this batch
+        row_words = vbr_data_32[starts + steps].view(num_rows, num_sb, sb_words)
+        mag_accumulator = torch.zeros((num_rows, num_sb, 32), device=device, dtype=torch.int32)
         
-        decoded_weights[row_idx] = w.half()
+        ptr, m_bits, shift_up = 0, D_val - 1, 0
+        
+        # 1. Unpack 4-Bit Base
+        if m_bits >= 4:
+            w = row_words[:, :, ptr : ptr+4].unsqueeze(-1)
+            sh = (torch.arange(8, device=device) * 4).view(1, 1, 1, 8)
+            mag_accumulator |= (((w >> sh) & 0xF).view(num_rows, num_sb, 32) << shift_up)
+            ptr += 4; m_bits -= 4; shift_up += 4
             
-    return decoded_weights
+        # 2. Unpack 2-Bit Residual
+        if m_bits >= 2:
+            w = row_words[:, :, ptr : ptr+2].unsqueeze(-1)
+            sh = (torch.arange(16, device=device) * 2).view(1, 1, 1, 16)
+            mag_accumulator |= (((w >> sh) & 0x3).view(num_rows, num_sb, 32) << shift_up)
+            ptr += 2; m_bits -= 2; shift_up += 2
+            
+        # 3. Unpack 1-Bit Residual
+        if m_bits == 1:
+            w = row_words[:, :, ptr : ptr+1].unsqueeze(-1)
+            sh = torch.arange(32, device=device).view(1, 1, 1, 32)
+            mag_accumulator |= (((w >> sh) & 0x1).view(num_rows, num_sb, 32) << shift_up)
+            ptr += 1
+            
+        # 4. Unpack Signs
+        sw = row_words[:, :, ptr : ptr+1].unsqueeze(-1)
+        sh = torch.arange(32, device=device).view(1, 1, 1, 32)
+        signs = ((sw >> sh) & 0x1).view(num_rows, in_features)
 
-def get_nested_module(m, name):
+        # ==========================================
+        # TOPOLOGY MATH (Matched to C++ bin > 0 logic)
+        # ==========================================
+        num_bins = (1 << (D_val - 1)) - 1.0
+        mag_flat = mag_accumulator.view(num_rows, in_features)
+        norm_w = mag_flat.to(torch.float32) / num_bins
+        
+        a = alphas[row_indices].unsqueeze(1).float()
+        c = cs[row_indices].unsqueeze(1).float()
+        m = ms[row_indices].unsqueeze(1).float()
+        s = scales[row_indices].unsqueeze(1).float()
+        
+        inner = torch.clamp((1.0 - a) * norm_w + a * (norm_w ** m), 1e-6, 1.0)
+        curve = inner ** c
+        
+        # EXACT C++ MATCH: If magnitude is 0, curve MUST be exactly 0.0
+        #curve = torch.where(mag_flat == 0, 0.0, curve)
+        
+        magnitudes = s * curve
+        sign_flip = torch.where(signs == 1, -1.0, 1.0).float()
+        
+        recon_matrix[row_indices] = (magnitudes * sign_flip).half()
+
+        
+    return recon_matrix
+
+def get_module(m, name):
     for p in name.split("."): m = getattr(m, p)
     return m
 
+# ==========================================
+# MAIN EXECUTION
+# ==========================================
 @torch.inference_mode()
 def main():
-    print(f"[*] Loading FP16 Skeleton from {MODEL_ID}...")
-    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float16, device_map="cpu")
+    print(f"[*] Initializing Qwen Skeleton: {MODEL_ID}")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float16, device_map="cpu", attn_implementation="eager")
     
     chunk_files = sorted(glob.glob(os.path.join(COMPILED_DIR, "*.pt")))
-    if not chunk_files:
-        print(f"[!] No compressed files found in {COMPILED_DIR}. Did you run the Autoencoder?")
-        return
+
+    print("\n[*] Injecting V36 Quantized Geometry...")
+    total_updated = 0
+    total_found_in_files = 0
+
+    for cf in chunk_files:
+        data = torch.load(cf, map_location="cpu")["experts_cold"]
+        total_found_in_files += len(data)
         
-    print("\n[*] Unpacking V35 SWAR Files & Rebuilding Geometry...")
-    for chunk_file in chunk_files:
-        print(f" -> Reading {os.path.basename(chunk_file)}...")
-        data = torch.load(chunk_file, map_location="cpu")["experts_cold"]
-        
-        for key, payload in tqdm(data.items(), leave=False, desc="Decoding Matrices"):
-            module_path = key.replace(".weight", "") if key.endswith(".weight") else key
-            try: 
-                target_module = get_nested_module(model, module_path)
-            except AttributeError: 
-                continue
+        for key, payload in tqdm(data.items(), leave=False, desc=f"Unpacking {os.path.basename(cf)}"):
+            # 1. STRIP EVERYTHING TO BE SAFE
+            # We want to match the module name exactly
+            module_name = key.replace(".weight", "")
             
+            try:
+                target = get_module(model, module_name)
+            except AttributeError:
+                # TRY FALLBACK: Some versions of HF Qwen don't have the 'model.' prefix in named_modules
+                try:
+                    alt_name = module_name.replace("model.", "")
+                    target = get_module(model, alt_name)
+                except AttributeError:
+                    print(f"\n[!] WARNING: Could not find module {module_name} in the model skeleton!")
+                    continue
+
+            # 2. LOAD LOGIC
             if payload.get("is_vbr_compressed", False):
-                # Decompress natively on GPU for speed, pull the FP16 matrix to CPU RAM
-                W_recon = dequantize_vbr_matrix_v35(payload, device=DEVICE)
-                target_module.weight.data.copy_(W_recon.cpu())
-                del W_recon
+                W = dequantize_vbr_v36(payload, device=DEVICE)
+                target.weight.data.copy_(W.cpu())
+                total_updated += 1
+                del W
             elif "raw_data" in payload:
-                target_module.weight.data.copy_(payload["raw_data"].cpu())
-                
+                target.weight.data.copy_(payload["raw_data"].cpu())
+                total_updated += 1
+            else:
+                print(f"\n[!] WARNING: Layer {module_name} found but has no recognizable data!")
+
+            # 3. BIAS HANDLING
             if "bias" in payload and payload["bias"] is not None:
-                if hasattr(target_module, "bias") and target_module.bias is not None:
-                    target_module.bias.data.copy_(payload["bias"].cpu())
-                    
-        del data
-        torch.cuda.empty_cache()
-        gc.collect()
-                
-    print("\n[*] Geometry Rebuilt. Pushing 7B model to GPU...")
-    model = model.to(DEVICE)
-    
-    prompt = "The architecture of a neural network can be described as"
+                if hasattr(target, "bias") and target.bias is not None:
+                    target.bias.data.copy_(payload["bias"].cpu())
+        
+        del data; gc.collect()
+
+    print(f"\n[*] AUDIT COMPLETE: Updated {total_updated} linear layers out of {total_found_in_files} found in files.")
+
+    print("\n[*] Pushing Model to GPU Device...")
+    model = model.to(DEVICE).float()
+    torch.cuda.empty_cache()
+
+    prompt = "The future of bare-metal GPU programming is"
     print(f"\n[Prompt] {prompt}")
     inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
     
-    print("[*] Generating (Hugging Face FP16 Native)...")
-    outputs = model.generate(**inputs, max_new_tokens=150, do_sample=True, temperature=0.7)
+    print("[*] Generating...")
+    # Using stable sampling parameters
+    outputs = model.generate(
+        **inputs, 
+        max_new_tokens=100, 
+        do_sample=True, 
+        temperature=0.7, 
+        top_k=50, 
+        repetition_penalty=1.15
+    )
         
     print(f"\n[Response]\n{tokenizer.decode(outputs[0], skip_special_tokens=True)}\n")
 
