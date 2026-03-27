@@ -351,35 +351,70 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
     # ==========================================
     # FINAL BIT PACKING (SWAR)
     # ==========================================
+    """
+    Packs a quantized matrix into the V36 4-2-1-1 Superblock format.
+    """
+    rows, in_features = quantized_indices.shape
+    
     packed_bytes = []
     offsets = []
     current_offset = 0
-    powers_of_2 = torch.tensor([1, 2, 4, 8, 16, 32, 64, 128], device=device, dtype=torch.int32)
-
+    
     for i in range(rows):
         D = int(final_bitrates[i].item())
-        row_idx = quantized_indices[i].view(-1, 8)
+        mag_bits = D - 1
+        num_superblocks = in_features // 32
         
-        r_bytes = []
+        # Extract row magnitudes and signs, reshaping into superblocks of 32
+        row_q = quantized_indices[i]
+        mag = row_q.abs().to(torch.int32).view(num_superblocks, 32)
+        sgn = (row_q < 0).to(torch.int32).view(num_superblocks, 32)
         
-        # Because the sign bit is already fused, we just loop exactly D times!
-        for bit_idx in range(D):
-            bit_slice = (row_idx >> bit_idx) & 1
-            packed_byte = (bit_slice * powers_of_2).sum(dim=1).to(torch.uint8)
-            r_bytes.append(packed_byte)
+        superblocks_data = []
+        
+        # 1. Pack 4-Bit Base (16 bytes per superblock)
+        if mag_bits >= 4:
+            m4 = mag & 0xF
+            shifts = torch.arange(8, device=device) * 4
+            words_4bit = (m4.view(num_superblocks, 4, 8) << shifts).sum(dim=-1, dtype=torch.int32)
+            superblocks_data.append(words_4bit)
+            mag >>= 4
+            mag_bits -= 4
             
-        packed_row = torch.stack(r_bytes, dim=1).flatten()
+        # 2. Pack 2-Bit Residual (8 bytes per superblock)
+        if mag_bits >= 2:
+            m2 = mag & 0x3
+            shifts = torch.arange(16, device=device) * 2
+            words_2bit = (m2.view(num_superblocks, 2, 16) << shifts).sum(dim=-1, dtype=torch.int32)
+            superblocks_data.append(words_2bit)
+            mag >>= 2
+            mag_bits -= 2
+            
+        # 3. Pack 1-Bit Residual (4 bytes per superblock)
+        if mag_bits == 1:
+            m1 = mag & 0x1
+            shifts = torch.arange(32, device=device)
+            words_1bit = (m1.view(num_superblocks, 1, 32) << shifts).sum(dim=-1, dtype=torch.int32)
+            superblocks_data.append(words_1bit)
+            
+        # 4. Pack Signs (4 bytes per superblock)
+        shifts = torch.arange(32, device=device)
+        words_sign = (sgn.view(num_superblocks, 1, 32) << shifts).sum(dim=-1, dtype=torch.int32)
+        superblocks_data.append(words_sign)
         
-        packed_bytes.append(packed_row)
+        # Interleave and flatten the superblock words directly into a raw bytearray
+        row_data = torch.cat(superblocks_data, dim=1).flatten().view(torch.uint8)
+        
+        packed_bytes.append(row_data)
         offsets.append(current_offset)
-        current_offset += len(packed_row)
+        current_offset += len(row_data)
 
     vbr_data = torch.cat(packed_bytes)
     vbr_offsets = torch.tensor(offsets, dtype=torch.int32)
 
     return {
         "is_vbr_compressed": True,
-        "original_shape": weight_tensor.shape,
+        "original_shape": quantized_indices.shape,
         "vbr_data": vbr_data.cpu(),
         "vbr_offsets": vbr_offsets.cpu(),
         "bitrates": final_bitrates.cpu().to(torch.uint8),
@@ -388,6 +423,7 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         "param_m": final_m.half().cpu(),
         "row_max": row_max.half().cpu()
     }
+
 
 def main():
     parser = argparse.ArgumentParser()
