@@ -46,8 +46,8 @@ EXPERT_ERROR    = 0.08  # Loose tolerance for FFN Gate, Up, Down
 DEFAULT_ERROR   = 0.01
 
 LENIENCY_MASK_DEFAULT =  {2: 1.0, 3: 1.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
-LENIENCY_MASK_EXPERT  =  {2: 2.0, 3: 1.5, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
-LENIENCY_MASK_ATTN    =  {2: 2.0, 3: 1.5, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+LENIENCY_MASK_EXPERT  =  {2: 1.5, 3: 1.3, 4: 1.1, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+LENIENCY_MASK_ATTN    =  {2: 1.5, 3: 1.3, 4: 1.1, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
 
 '''
 # VBR TOLERANCE SETTINGS - EXTREME COMPRESSION RUN
@@ -166,7 +166,9 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
                 # If it's a movable floor (like 0.125), let it survive!
                 warped = torch.where(warped_raw < 1e-4, 0.0, warped_raw)
                 warped = torch.clamp(warped, 0.0, 1.0)
-                
+
+                #warped[:, :, 0] = 0.0
+
                 warped_sorted, _ = torch.sort(warped, dim=2) 
                 
                 # ==========================================
@@ -339,13 +341,11 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         r_m = final_m[mask].unsqueeze(1)
         r_norm = normalized_weights[mask]
 
-        # NEW: Hardware-Safe Movable Zero Math for Assignment
-        safe_base = base_bins.unsqueeze(0) + 1e-9
-        inner = (1.0 - r_a) * safe_base + r_a * (safe_base ** r_m)
-        warped_raw = inner ** r_c
-        
-        warped_bins = torch.where(warped_raw < 1e-4, 0.0, warped_raw)
-        warped_bins = torch.clamp(warped_bins, 0.0, 1.0)
+        inner = (1.0 - r_a) * base_bins.unsqueeze(0) + r_a * (base_bins.unsqueeze(0) ** r_m)
+        safe_inner_pack = torch.clamp(inner, 1e-6, 1.0)
+        warped_bins = torch.clamp(safe_inner_pack ** r_c, 0.0, 1.0)
+
+        #warped_bins[:, 0] = 0.0
 
         best_indices = torch.zeros_like(r_norm, dtype=torch.long)
         chunk_size_pack = 256
