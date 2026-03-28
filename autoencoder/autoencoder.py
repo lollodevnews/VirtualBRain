@@ -123,13 +123,19 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         scale_f32 = active_scale.to(torch.float32).unsqueeze(1) 
         energy_f32 = row_energy.to(torch.float32).unsqueeze(1)  
         
-        divisor = float(K_bins - 1)
-        base_bins = torch.arange(K_bins, device=device).float() / divisor
+        # Inside the current_D loop, before evaluate_grid:
+        if current_D == 2:
+            base_bins = torch.tensor([0.20, 1.0], device=device, dtype=torch.float32)
+        elif current_D == 3:
+            base_bins = torch.tensor([0.25, 0.50, 0.75, 1.0], device=device, dtype=torch.float32)
+        else:
+            divisor = float(K_bins - 1)
+            base_bins = torch.arange(K_bins, device=device).float() / divisor
 
         # ==========================================
         # INLINE GRID EVALUATOR (THE CDF ALGEBRAIC SHORTCUT)
         # ==========================================
-        def evaluate_grid(guess_w_a, guess_w_c, guess_w_m, chunk_size=128):
+        def evaluate_grid(guess_w_a, guess_w_c, guess_w_m, chunk_size, current_active_scale):
             G = guess_w_a.shape[1]
             best_w_a = torch.empty(batch_len, device=device)
             best_w_c = torch.empty(batch_len, device=device)
@@ -149,28 +155,52 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
                 c_g = C_MAX * torch.sigmoid(gw_c_chunk) 
                 wm_g = gw_m_chunk
 
-                # Linkage & Topology
+                # ==========================================
+                # 1. HARDWARE SIMULATION: PARAMETER TRUNCATION
+                # Force the grid to evaluate the exact FP16 values that will be saved to disk
+                # ==========================================
+                a_g = a_g.half().float()
+                c_g = c_g.half().float()
+        
+                # Note: Depending on how you generate m_g, cast it after it's fully calculated
                 safe_denom = torch.abs(a_g) + 0.001 
                 link_factor = 1.0 + (1.0 / safe_denom)
                 m_log = 0.5 * torch.log(wm_g**2 + 1.0)
-                m_g = torch.clamp(((M_MAX /  link_factor) + 1.0) * m_log * link_factor, 0, M_MAX)
-                
-                # ==========================================
-                # NEW: Hardware-Safe Movable Zero Math
-                # ==========================================
-                safe_b = b + 1e-9 # Prevent NaN during 0^m
-                inner = (1.0 - a_g) * safe_b + a_g * (safe_b ** m_g)
-                warped_raw = inner ** c_g
-                
-                # Soft-Zero Threshold: If it's mathematical noise, crush it to true 0.0. 
-                # If it's a movable floor (like 0.125), let it survive!
-                warped = torch.where(warped_raw < 1e-4, 0.0, warped_raw)
-                warped = torch.clamp(warped, 0.0, 1.0)
+                m_g = torch.clamp(((M_MAX / link_factor) + 1.0) * m_log * link_factor, 0.01, M_MAX)
+                m_g = m_g.half().float() 
+        
+                # Also cast the scale, since the packer saves it as FP16!
+                # scale_f32 = scale_f32.half().float() # (Apply this if scale is calculated here)
 
-                #warped[:, :, 0] = 0.0
-
-                warped_sorted, _ = torch.sort(warped, dim=2) 
+                # ==========================================
+                # 2. TOPOLOGY MATH (Explicit Zero-Bypass)
+                # ==========================================
                 
+                # Exponent == 0 ? 1.0 : (Base == 0 ? 0.0 : Base^Exp)
+                m_term = torch.where(m_g == 0.0, 1.0, 
+                            torch.where(b == 0.0, 0.0, b ** m_g))
+                
+                inner = (1.0 - a_g) * b + a_g * m_term
+                
+                # Clamp to safely prevent any negative bases before the C-power
+                inner_clamped = torch.clamp(inner, 0.0, 1.0)
+                
+                warped = torch.where(c_g == 0.0, 1.0, 
+                            torch.where(inner_clamped == 0.0, 0.0, inner_clamped ** c_g))
+
+                # ==========================================
+                # 3. HARDWARE SIMULATION: INFERENCE SCALING TRUNCATION
+                # ==========================================
+                
+                s_sim = active_scale.view(-1, 1, 1).half().float()
+                
+                # 3. Execute truncation
+                warped_scaled = (warped * s_sim).half().float()
+                warped = warped_scaled / s_sim
+
+                # Now proceed with the exact CDF error algebraic sort...
+                warped_sorted, _ = torch.sort(warped, dim=2)
+
                 # ==========================================
                 # THE 0-MEMORY MAGIC: Threshold Search
                 # ==========================================
@@ -256,7 +286,7 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         guess_w_a = torch.empty(batch_len, N_stage0, device=device).uniform_(W_A_MIN, W_A_MAX)
         guess_w_c = torch.empty(batch_len, N_stage0, device=device).uniform_(W_C_MIN, W_C_MAX)
         guess_w_m = torch.empty(batch_len, N_stage0, device=device).uniform_(W_M_MIN, W_M_MAX)
-        best_w_a, best_w_c, best_w_m, best_error = evaluate_grid(guess_w_a, guess_w_c, guess_w_m, safe_chunk)
+        best_w_a, best_w_c, best_w_m, best_error = evaluate_grid(guess_w_a, guess_w_c, guess_w_m, safe_chunk, active_scale)
 
         # ==========================================
         # STAGE 1: UNIFORM NEIGHBORHOOD SEARCH
@@ -271,7 +301,7 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         jit_m = torch.empty(batch_len, N_stage1, device=device).uniform_(-REFINEMENT_AREA_1, REFINEMENT_AREA_1) * W_M_RANGE
         guess_w_m = torch.clamp(best_w_m.unsqueeze(1) + jit_m, W_M_MIN, W_M_MAX)
         
-        best_w_a, best_w_c, best_w_m, best_error = evaluate_grid(guess_w_a, guess_w_c, guess_w_m, safe_chunk)
+        best_w_a, best_w_c, best_w_m, best_error = evaluate_grid(guess_w_a, guess_w_c, guess_w_m, safe_chunk,active_scale)
 
         # ==========================================
         # STAGE 2: UNIFORM MICRO-POLISH
@@ -286,7 +316,7 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         jit_m = torch.empty(batch_len, N_stage2, device=device).uniform_(-REFINEMENT_AREA_2, REFINEMENT_AREA_2) * W_M_RANGE
         guess_w_m = torch.clamp(best_w_m.unsqueeze(1) + jit_m, W_M_MIN, W_M_MAX)
         
-        best_w_a, best_w_c, best_w_m, best_error = evaluate_grid(guess_w_a, guess_w_c, guess_w_m, safe_chunk)
+        best_w_a, best_w_c, best_w_m, best_error = evaluate_grid(guess_w_a, guess_w_c, guess_w_m, safe_chunk, active_scale)
 
         # ==========================================
         # PARETO THRESHOLD & PHYSICAL ASSIGNMENT
@@ -294,8 +324,8 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         threshold = max_energy_error * leniency_map.get(current_D, 1.0)
         pass_mask = best_error <= threshold
 
-        if current_D == 5 and "gate" in name:
-            print(f"\n[X-RAY] {name} | 5-Bit Mean L1 Error: {best_error.mean().item():.4f} | Target: {threshold:.4f}")
+        if current_D == 4 and "gate" in name:
+            print(f"\n[X-RAY] {name} | 4-Bit Mean L1 Error: {best_error.mean().item():.4f} | Target: {threshold:.4f}")
 
         if pass_mask.any():
             passed_global_indices = active_indices[pass_mask]
@@ -306,25 +336,27 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
             win_w_c = best_w_c[pass_mask]
             win_w_m = best_w_m[pass_mask]
             
-            a_phys = torch.tanh(win_w_a)
-            c_phys = C_MAX * torch.sigmoid(win_w_c)
+            a_phys = torch.tanh(win_w_a).half().float()
+            c_phys = (C_MAX * torch.sigmoid(win_w_c)).half().float()
             
             safe_denom = torch.abs(a_phys) + 0.001 
             link_factor = 1.0 + (1.0 / safe_denom)
             m_log = 0.5 * torch.log(win_w_m**2 + 1.0)
             m_raw = ((M_MAX /  link_factor) + 1.0) * m_log * link_factor
-            m_phys = torch.clamp(m_raw, 0, M_MAX)
+            m_phys = torch.clamp(m_raw, 0.01, M_MAX).half().float()
             
+
             final_a[passed_global_indices] = a_phys
             final_c[passed_global_indices] = c_phys
             final_m[passed_global_indices] = m_phys
         
         active_indices = active_indices[~pass_mask]
 
+
     # ==========================================
     # THE SUPERBLOCK PACKER & DYNAMIC ASSIGNMENT
     # ==========================================
-    # We use int32 so PyTorch doesn't do weird sign-extensions during bitwise shifts
+
     quantized_indices = torch.zeros((rows, cols), dtype=torch.int32, device=device)
 
     for current_D in range(2, 9):
@@ -333,20 +365,25 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
 
         K_bins = 2 ** (current_D - 1)
 
-        divisor = float(K_bins - 1)
-        base_bins = torch.arange(K_bins, device=device).float() / divisor
+        # 1. Restore Raised Floors for the Packer
+        if current_D == 2:
+            base_bins = torch.tensor([0.20, 1.0], device=device, dtype=torch.float32)
+        elif current_D == 3:
+            base_bins = torch.tensor([0.25, 0.50, 0.75, 1.0], device=device, dtype=torch.float32)
+        else:
+            divisor = float(K_bins - 1)
+            base_bins = torch.arange(K_bins, device=device).float() / divisor
 
         r_a = final_a[mask].unsqueeze(1)
         r_c = final_c[mask].unsqueeze(1)
         r_m = final_m[mask].unsqueeze(1)
         r_norm = normalized_weights[mask]
 
+        # 2. Calculate the physical LUT curves
         inner = (1.0 - r_a) * base_bins.unsqueeze(0) + r_a * (base_bins.unsqueeze(0) ** r_m)
-        safe_inner_pack = torch.clamp(inner, 1e-6, 1.0)
-        warped_bins = torch.clamp(safe_inner_pack ** r_c, 0.0, 1.0)
+        warped_bins = torch.clamp(inner, 1e-6, 1.0) ** r_c
 
-        #warped_bins[:, 0] = 0.0
-
+        # 3. Find the best physical bins
         best_indices = torch.zeros_like(r_norm, dtype=torch.long)
         chunk_size_pack = 256
         
@@ -485,8 +522,6 @@ def main():
         vbr_result = compress_vbr_v35_matrix(name, weight, layer_error, leniency_mask) 
         
         if vbr_result is not None:
-            if hasattr(model.get_submodule(name), "bias") and model.get_submodule(name).bias is not None:
-                vbr_result["bias"] = model.get_submodule(name).bias.half().cpu()
             chunk_dict[name] = vbr_result
         else:
             chunk_dict[name] = {
@@ -494,7 +529,9 @@ def main():
                 "is_vbr_compressed": False,
                 "original_shape": weight.shape
             }
-            
+        if hasattr(model.get_submodule(name), "bias") and model.get_submodule(name).bias is not None:
+            vbr_result["bias"] = model.get_submodule(name).bias.half().cpu()
+
         del weight
         torch.cuda.empty_cache()
         gc.collect()
