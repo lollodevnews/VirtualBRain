@@ -2,12 +2,7 @@ import os
 # 1. HARDWARE CONFIGURATION
 os.environ["TORCH_BLAS_PREFER_HIPBLASLT"] = "0"
 os.environ["HSA_ENABLE_SDMA"] = "0"
-#os.environ["PYTORCH_HIP_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["PYTORCH_HIP_ALLOC_CONF"] = "max_split_size_mb:128"
-
-HARDWARE_TARGET = "mi50"
-from vbr_options import setup_hardware_profile
-setup_hardware_profile(HARDWARE_TARGET)
 
 # 2. STANDARD IMPORTS
 import torch
@@ -16,6 +11,12 @@ import gc
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
+
+
+##applying my gpu quirks
+torch.backends.cuda.enable_flash_sdp(False)
+torch.backends.cuda.enable_mem_efficient_sdp(False)
+torch.backends.cuda.enable_math_sdp(True)
 
 # ==========================================
 # HYPERPARAMETERS
