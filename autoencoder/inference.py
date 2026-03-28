@@ -18,12 +18,12 @@ MODEL_ID = os.path.expanduser("~/models/quant/qwen25_7b")
 COMPILED_DIR = "./quant_qwen"
 
 # ==========================================
-# THE V36 DEQUANTIZER (CLEAN ROOM EDITION)
+# THE V36 DEQUANTIZER (UNIFIED LUT EDITION)
 # ==========================================
 def dequantize_vbr_v36(weight_dict, device="cuda"):
     """
-    Decodes 4-2-1-1 Superblocks with Desmos Continuous Topology.
-    Mirrors autoencoder.py exactly with Hardware-Safe Clamping.
+    Decodes 4-2-1-1 Superblocks with Unified Desmos Continuous Topology.
+    Branchless LUT architecture optimized for hardware.
     """
     out_features, in_features = weight_dict["original_shape"]
     
@@ -93,28 +93,43 @@ def dequantize_vbr_v36(weight_dict, device="cuda"):
         signs = ((sw >> sh) & 0x1).view(num_rows, in_features)
 
         # ==========================================
-        # TOPOLOGY MATH (Matched to C++ bin > 0 logic)
+        # TOPOLOGY MATH (Unified Branchless LUT)
         # ==========================================
-        num_bins = (1 << (D_val - 1)) - 1.0
-        mag_flat = mag_accumulator.view(num_rows, in_features)
-        norm_w = mag_flat.to(torch.float32) / num_bins
+        K_bins = 1 << (D_val - 1)
+        divisor = float(K_bins - 1)
+        
+        # 1. Generate Uniform Base Bins (No if/else branching!)
+        base_bins = torch.arange(K_bins, device=device).float() / divisor
+        
+        # 2. Grab the raw integer magnitudes (e.g., 0, 1, 2, 3)
+        mag_idx = mag_accumulator.view(num_rows, in_features).long()
         
         a = alphas[row_indices].unsqueeze(1).float()
         c = cs[row_indices].unsqueeze(1).float()
         m = ms[row_indices].unsqueeze(1).float()
         s = scales[row_indices].unsqueeze(1).float()
+        b = base_bins.unsqueeze(0) # Broadcastable base bins [1, K_bins]
+
+        # 3. LUT Math (Evaluate ONLY K_bins times per row, bypass 0^0 safely)
+        safe_b = torch.where(b == 0.0, 1e-9, b)
+        m_term = torch.where(m == 0.0, 1.0, 
+                    torch.where(b == 0.0, 0.0, safe_b ** m))
         
-        inner = torch.clamp((1.0 - a) * norm_w + a * (norm_w ** m), 1e-6, 1.0)
-        curve = inner ** c
+        inner = (1.0 - a) * b + a * m_term
+        inner_clamped = torch.clamp(inner, 0.0, 1.0)
         
-        # EXACT C++ MATCH: If magnitude is 0, curve MUST be exactly 0.0
-        curve = torch.where(mag_flat == 0, 0.0, curve)
+        safe_inner = torch.where(inner_clamped == 0.0, 1e-9, inner_clamped)
+        warped_lut = torch.where(c == 0.0, 1.0, 
+                    torch.where(inner_clamped == 0.0, 0.0, safe_inner ** c)) # [num_rows, K_bins]
+
+        # 4. Gather Physical Bins (Hardware accelerated lookup mapping 4096 columns)
+        gathered = torch.gather(warped_lut, 1, mag_idx)
         
-        magnitudes = s * curve
+        # 5. Apply Scale and Sign
+        magnitudes = gathered * s
         sign_flip = torch.where(signs == 1, -1.0, 1.0).float()
         
         recon_matrix[row_indices] = (magnitudes * sign_flip).half()
-
         
     return recon_matrix
 
@@ -129,7 +144,13 @@ def get_module(m, name):
 def main():
     print(f"[*] Initializing Qwen Skeleton: {MODEL_ID}")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float16, device_map="cpu", attn_implementation="eager")
+    
+    # 🚨 FIX: Removed eager attention, loading natively in FP16 to GPU
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID, 
+        torch_dtype=torch.float16, 
+        device_map=DEVICE 
+    )
     
     chunk_files = sorted(glob.glob(os.path.join(COMPILED_DIR, "*.pt")))
 
@@ -143,7 +164,6 @@ def main():
         
         for key, payload in tqdm(data.items(), leave=False, desc=f"Unpacking {os.path.basename(cf)}"):
             # 1. STRIP EVERYTHING TO BE SAFE
-            # We want to match the module name exactly
             module_name = key.replace(".weight", "")
             
             try:
@@ -178,8 +198,8 @@ def main():
 
     print(f"\n[*] AUDIT COMPLETE: Updated {total_updated} linear layers out of {total_found_in_files} found in files.")
 
-    print("\n[*] Pushing Model to GPU Device...")
-    model = model.to(DEVICE).float()
+    # 🚨 FIX: Removed model = model.to(DEVICE).float() which destroyed RoPE embeddings
+    print("\n[*] Preparing Model for Generation...")
     torch.cuda.empty_cache()
 
     prompt = "The future of bare-metal GPU programming is"
