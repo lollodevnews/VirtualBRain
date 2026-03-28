@@ -118,14 +118,8 @@ def dequantize_vbr_v36(weight_dict, device="cuda"):
         # 1. Grab the raw integer magnitudes (e.g., 0, 1, 2, 3)
         mag_idx = mag_accumulator.view(num_rows, in_features).long()
         
-        # 2. Rebuild the V35 Base Bins (The raised noise floors!)
-        if D_val == 2:
-            base_bins = torch.tensor([0.20, 1.0], device=device, dtype=torch.float32)
-        elif D_val == 3:
-            base_bins = torch.tensor([0.25, 0.50, 0.75, 1.0], device=device, dtype=torch.float32)
-        else:
-            divisor = float(K_bins - 1)
-            base_bins = torch.arange(K_bins, device=device).float() / divisor
+        divisor = float(K_bins - 1)
+        base_bins = torch.arange(K_bins, device=device).float() / divisor
             
         a = alphas[row_indices].unsqueeze(1).float()
         c = cs[row_indices].unsqueeze(1).float()
