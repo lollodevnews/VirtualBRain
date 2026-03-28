@@ -2,7 +2,8 @@ import os
 # 1. HARDWARE CONFIGURATION
 os.environ["TORCH_BLAS_PREFER_HIPBLASLT"] = "0"
 os.environ["HSA_ENABLE_SDMA"] = "0"
-os.environ["PYTORCH_HIP_ALLOC_CONF"] = "expandable_segments:True"
+#os.environ["PYTORCH_HIP_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_HIP_ALLOC_CONF"] = "max_split_size_mb:128"
 
 HARDWARE_TARGET = "mi50"
 from vbr_options import setup_hardware_profile
@@ -20,7 +21,7 @@ from datasets import load_dataset
 # HYPERPARAMETERS
 # ==========================================
 EARLY_EXIT_50 = False   # <--- EARLY EXIT TOGGLE
-CONTEXT_LENGTH = 1024  # If it still OOMs, drop this to 1024 or 512
+CONTEXT_LENGTH = 2048  # If it still OOMs, drop this to 1024 or 512
 STRIDE = 512
 # ==========================================
 
@@ -31,6 +32,22 @@ print("==========================================")
 MODEL_ID = os.path.expanduser("~/models/quant/qwen25_7b")
 COMPRESSED_DIR = "./quant_qwen"
 DEVICE = "cuda:0"
+
+
+# ==========================================
+# HIPBLAS WARM-UP HACK
+# Force PyTorch to allocate the math library context 
+# while the GPU VRAM is 100% empty.
+# ==========================================
+print("[*] Warming up HIPBLAS context...")
+_dummy_a = torch.randn(16, 16, device=DEVICE)
+_dummy_b = torch.randn(16, 16, device=DEVICE)
+_ = _dummy_a @ _dummy_b
+del _dummy_a, _dummy_b, _
+torch.cuda.empty_cache()
+# ==========================================
+
+
 
 def dequantize_vbr_v36(weight_dict, device="cuda"):
     """ Natively unpacks the V36 4-2-1-1 Superblocks (Hardware Safe) """
@@ -92,24 +109,47 @@ def dequantize_vbr_v36(weight_dict, device="cuda"):
         sw = row_words[:, :, ptr : ptr+1].unsqueeze(-1)
         sh = torch.arange(32, device=device).view(1, 1, 1, 32)
         signs = ((sw >> sh) & 0x1).view(num_rows, in_features)
-        
+
         # ==========================================
-        # TOPOLOGY MATH (Matched exactly to working inference)
+        # TOPOLOGY MATH (The V35 LUT Architecture)
         # ==========================================
-        num_bins = (1 << (D_val - 1)) - 1.0
-        mag_flat = mag_accumulator.view(num_rows, in_features)
-        norm_w = mag_flat.to(torch.float32) / num_bins
+        K_bins = 1 << (D_val - 1)
         
+        # 1. Grab the raw integer magnitudes (e.g., 0, 1, 2, 3)
+        mag_idx = mag_accumulator.view(num_rows, in_features).long()
+        
+        # 2. Rebuild the V35 Base Bins (The raised noise floors!)
+        if D_val == 2:
+            base_bins = torch.tensor([0.20, 1.0], device=device, dtype=torch.float32)
+        elif D_val == 3:
+            base_bins = torch.tensor([0.25, 0.50, 0.75, 1.0], device=device, dtype=torch.float32)
+        else:
+            divisor = float(K_bins - 1)
+            base_bins = torch.arange(K_bins, device=device).float() / divisor
+            
         a = alphas[row_indices].unsqueeze(1).float()
         c = cs[row_indices].unsqueeze(1).float()
         m = ms[row_indices].unsqueeze(1).float()
         s = scales[row_indices].unsqueeze(1).float()
+        b = base_bins.unsqueeze(0) # Broadcastable base bins [1, K_bins]
+
+        # 3. LUT Math (Evaluate ONLY K_bins times per row, bypass 0^0 safely)
+        safe_b = torch.where(b == 0.0, 1e-9, b)
+        m_term = torch.where(m == 0.0, 1.0, 
+                    torch.where(b == 0.0, 0.0, safe_b ** m))
         
-        # The clamp protects against negative bases causing NaN during the power operation
-        inner = torch.clamp((1.0 - a) * norm_w + a * (norm_w ** m), 1e-6, 1.0)
-        curve = inner ** c
+        inner = (1.0 - a) * b + a * m_term
+        inner_clamped = torch.clamp(inner, 0.0, 1.0)
         
-        magnitudes = s * curve
+        safe_inner = torch.where(inner_clamped == 0.0, 1e-9, inner_clamped)
+        warped_lut = torch.where(c == 0.0, 1.0, 
+                    torch.where(inner_clamped == 0.0, 0.0, safe_inner ** c)) # [num_rows, K_bins]
+
+        # 4. Gather Physical Bins (Hardware accelerated lookup mapping 4096 columns)
+        gathered = torch.gather(warped_lut, 1, mag_idx)
+        
+        # 5. Apply Scale and Sign
+        magnitudes = gathered * s
         sign_flip = torch.where(signs == 1, -1.0, 1.0).float()
         
         recon_matrix[row_indices] = (magnitudes * sign_flip).half()
@@ -122,15 +162,24 @@ def get_module(m, name):
 
 @torch.inference_mode()
 def main():
-    print("[1] Loading Base Model and Tokenizer (FP16 Skeleton)...")
+    print("[1] Loading Base Model and Tokenizer (FP16)...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
         torch_dtype=torch.float16,
-        device_map="cpu",
-        attn_implementation="eager"
+        device_map=DEVICE # Load directly to GPU
+        # REMOVED attn_implementation="eager"
     )
     
+    print(f"\n[2] Injecting V36 Weights from {COMPRESSED_DIR}...")
+    # ... keep your injection loop exactly as it is ...
+    # Make sure W = dequantize_vbr_v36(...) returns .half() (which it does!)
+    
+    # REMOVED model = model.to(DEVICE).float()
+    
+    print("\n[4] Loading WikiText-2 Dataset...")
+    # ... run your dataset loop exactly as it is ...
+
     print(f"\n[2] Injecting V36 Weights from {COMPRESSED_DIR}...")
     chunk_files = sorted(glob.glob(os.path.join(COMPRESSED_DIR, "*.pt")))
     total_updated = 0
@@ -166,7 +215,7 @@ def main():
     print(f"\n[*] AUDIT: Updated {total_updated} linear layers out of {total_found} found.")
 
     print("\n[3] Pushing Model to GPU Device (FP32 Accumulation)...")
-    model = model.to(DEVICE).float()
+    #model = model.to(DEVICE).float()
 
     print("\n[4] Loading WikiText-2 Dataset...")
     test = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
@@ -218,5 +267,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-(.venv) lolollo@node-01:~/models/vbr_main$ 
-
