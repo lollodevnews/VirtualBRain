@@ -123,14 +123,8 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
         scale_f32 = active_scale.to(torch.float32).unsqueeze(1) 
         energy_f32 = row_energy.to(torch.float32).unsqueeze(1)  
         
-        # Inside the current_D loop, before evaluate_grid:
-        if current_D == 2:
-            base_bins = torch.tensor([0.20, 1.0], device=device, dtype=torch.float32)
-        elif current_D == 3:
-            base_bins = torch.tensor([0.25, 0.50, 0.75, 1.0], device=device, dtype=torch.float32)
-        else:
-            divisor = float(K_bins - 1)
-            base_bins = torch.arange(K_bins, device=device).float() / divisor
+        divisor = float(K_bins - 1)
+        base_bins = torch.arange(K_bins, device=device).float() / divisor
 
         # ==========================================
         # INLINE GRID EVALUATOR (THE CDF ALGEBRAIC SHORTCUT)
@@ -167,8 +161,13 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
                 link_factor = 1.0 + (1.0 / safe_denom)
                 m_log = 0.5 * torch.log(wm_g**2 + 1.0)
                 m_g = torch.clamp(((M_MAX / link_factor) + 1.0) * m_log * link_factor, 0.01, M_MAX)
-                m_g = m_g.half().float() 
-        
+
+                m_g = torch.where(
+                    m_g < 1.5, 
+                    0.0, 
+                    torch.clamp(m_g, 1.5, M_MAX)
+                ).half().float()
+
                 # Also cast the scale, since the packer saves it as FP16!
                 # scale_f32 = scale_f32.half().float() # (Apply this if scale is calculated here)
 
@@ -343,8 +342,13 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
             link_factor = 1.0 + (1.0 / safe_denom)
             m_log = 0.5 * torch.log(win_w_m**2 + 1.0)
             m_raw = ((M_MAX /  link_factor) + 1.0) * m_log * link_factor
-            m_phys = torch.clamp(m_raw, 0.01, M_MAX).half().float()
-            
+            m_phys = torch.clamp(m_raw, 0.0, M_MAX).half().float()
+
+            m_ = torch.where(
+                    m_phys < 1.5, 
+                    0.0, 
+                    torch.clamp(m_phys, 1.5, M_MAX)
+                ).half().float()
 
             final_a[passed_global_indices] = a_phys
             final_c[passed_global_indices] = c_phys
@@ -541,4 +545,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
