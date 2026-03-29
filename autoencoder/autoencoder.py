@@ -46,8 +46,8 @@ EXPERT_ERROR    = 0.08  # Loose tolerance for FFN Gate, Up, Down
 DEFAULT_ERROR   = 0.01
 
 LENIENCY_MASK_DEFAULT =  {2: 1.0, 3: 1.0, 4: 1.0, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
-LENIENCY_MASK_EXPERT  =  {2: 1.5, 3: 1.3, 4: 1.1, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
-LENIENCY_MASK_ATTN    =  {2: 1.5, 3: 1.3, 4: 1.1, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+LENIENCY_MASK_EXPERT  =  {2: 1.5, 3: 1.3, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
+LENIENCY_MASK_ATTN    =  {2: 1.5, 3: 1.3, 4: 1.2, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.0}
 
 '''
 # VBR TOLERANCE SETTINGS - EXTREME COMPRESSION RUN
