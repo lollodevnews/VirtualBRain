@@ -1,9 +1,9 @@
-# VirtualBrain VBR: The Algebraic CDF Quantizer (V35)
+# VirtualBrain VBR PTQ: The Algebraic CDF Quantizer (V35)
 **A Variable BitRate (VBR) bare-metal quantization framework.**
 
 **THE EVOLUTION OF THIS PROJECT:** The journey started by wanting to move away from brute-force algorithms, leading us to simple neural networks and fixed anchor points. In V34, we moved to a Monte Carlo simulation but were bottlenecked by the extreme VRAM overhead of 3D mathematical grids and Mean Squared Error (MSE) evaluations. 
 
-With **V35**, we have completely shattered the Pareto frontier. By abandoning MSE in favor of a **Normalized L1 Energy Metric**, and replacing 3D tensor grids with a **Zero-Memory Algebraic CDF Shortcut**, V35 evaluates millions of non-linear Voronoi thresholds in a fraction of a millisecond. The result is an ultra-dense, mathematically pure compression engine that operates at the physical speed limit of the GPU.
+With **V35**, we have completely shattered the previous frontier. By abandoning MSE in favor of a **Normalized L1 Energy Metric**, and replacing 3D tensor grids with a **Zero-Memory Algebraic CDF Shortcut**, V35 evaluates millions of non-linear Voronoi thresholds in a fraction of a millisecond. The result is an ultra-dense, mathematically pure compression engine that operates at the physical speed limit of the GPU.
 
 ---
 
@@ -55,16 +55,7 @@ The VBR Sieve now measures the exact sum of the Y-axis divergences and divides i
 
 ---
 
-## 5. Fused SWAR Bit-Packing
-
-V34 relied on extracting the sign bit into a separate bit-plane, which added unnecessary indexing overhead.
-
-**V35 mathematically fuses the Sign Bit directly into the Most Significant Bit (MSB).**
-By offsetting negative assignments by K_bins during compilation, a 4-bit array naturally contains positive values in bins 0-7 and negative values in bins 8-15. This allows the SWAR (SIMD Within A Register) bit-packer to slice continuous data streams flawlessly. The GPU extracts D bits exactly D times without any manual sign-reconstruction logic, maximizing memory bandwidth saturation.
-
----
-
-## 6. The Hard Numbers (Qwen 2.5 7B)
+## 5. The Hard Numbers (Qwen 2.5 7B)
 
 Unlike standard repositories, we publish the exact mathematical degradation to prove the structural coherence of our flat file sizes. Benchmarked on an AMD Instinct MI50.
 
@@ -80,7 +71,7 @@ Unlike standard repositories, we publish the exact mathematical degradation to p
 
 ---
 
-## 7. How to Run the Framework
+## 6. How to Run the Framework
 
 ### Step 1: Compile the Model (The Autoencoder)
 Because VBR evaluates massive mathematical grids, the compression is split into chunks to protect GPU memory. Run the Autoencoder iteratively across your available GPUs:
