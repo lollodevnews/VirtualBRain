@@ -11,6 +11,8 @@ The core idea of the project is to use a perfectly stable, 3-parameter topology 
 The physical continuous curve is defined as:
 y = ((1 - a)x + a * x^m)^c
 
+---
+
 > ⚠️ **IMPORTANT: THE BUILDER'S SHIELD**
 > There are many potentially good intuitions here that are being actively explored, but don't treat this as "the truth". This is a highly experimental work in progress and, like every construction site, there are plenty of exposed sharp edges that will hurt you if you are not careful. Enjoy with awareness.
 
@@ -22,14 +24,10 @@ The open-source quantization community relies on a shared deception: **Group-Wis
 
 **VirtualBrain VBR abandons group-wise scaling entirely.** Instead of forcing a global bit-depth and patching the damage with metadata, VBR utilizes a custom Autoencoder powered by a **Zero-Memory Algebraic CDF Shortcut**. It evaluates the physical weight distribution of an entire row and compresses it using a continuous, non-linear Desmos Topology (a, c, m).
 
-### 1. Modulating Noise, Not Bits (L1 Energy Routing)
+### Modulating Noise, Not Bits (L1 Energy Routing)
 VBR actively evaluates the **Normalized L1 Energy** (the pure physical mass) of every single row and dynamically assigns it a bit-depth purely based on its noise tolerance, completely eliminating Mean Squared Error (MSE) illusions. 
 * **Attention Tensors** are hyper-sensitive. The engine enforces a strict **~4%** maximum L1 energy shift to protect context recall, naturally retaining higher bitrates.
 * **Expert / MLP Tensors** are massive but robust. The engine applies a relaxed **~8% to 12.5%** L1 allowance, crushing them down to 4-bit and 5-bit arrays to save massive amounts of VRAM without sacrificing intelligence.
-
-### 2. Fused SWAR & The Superblock Archive
-Instead of scattered bit-planes, VBR mathematically fuses the Sign Bit directly into the Most Significant Bit (MSB) during compilation. It then packs its continuous variable-bitrate streams into perfectly aligned, contiguous memory **Superblocks**. This allows bare-metal C++ and vectorized Python kernels to execute wide, zero-waste loads, instantly saturating the GPU's memory bandwidth without a single warp divergence.
-
 ---
 
 ## 🏆 The Hard Numbers (Qwen 2.5 7B)
