@@ -12,7 +12,7 @@ Instead of relying on hidden FP16 grids, VBR uses a custom Autoencoder to mathem
 
 ## 2. The Mathematical Formulation: V35 Topology
 
-The core idea of the v35 iteration is to use a perfectly stable, 3-parameter Desmos topology (a, c, m) to "draw" a function, whose purpose is to approximate and discover the best magnitude values for each quantization bin (once multiplied with the row scaler). 
+The core idea of the v35 iteration is to use a perfectly stable, 3-parameter topology (a, c, m) to "draw" a function, whose purpose is to approximate and discover the best magnitude values for each quantization bin (once multiplied with the row scaler). 
 
 **Interactive Desmos Topology Graph:** [Play with the V35 Curve Here](https://www.desmos.com/calculator/jwadm38ufo)
 
