@@ -369,14 +369,8 @@ def compress_vbr_v35_matrix(name, weight_tensor, max_energy_error, leniency_map)
 
         K_bins = 2 ** (current_D - 1)
 
-        # 1. Restore Raised Floors for the Packer
-        if current_D == 2:
-            base_bins = torch.tensor([0.20, 1.0], device=device, dtype=torch.float32)
-        elif current_D == 3:
-            base_bins = torch.tensor([0.25, 0.50, 0.75, 1.0], device=device, dtype=torch.float32)
-        else:
-            divisor = float(K_bins - 1)
-            base_bins = torch.arange(K_bins, device=device).float() / divisor
+        divisor = float(K_bins - 1)
+        base_bins = torch.arange(K_bins, device=device).float() / divisor
 
         r_a = final_a[mask].unsqueeze(1)
         r_c = final_c[mask].unsqueeze(1)
