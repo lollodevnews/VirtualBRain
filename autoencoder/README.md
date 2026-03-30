@@ -1,16 +1,7 @@
 # VirtualBrain VBR PTQ: The Algebraic CDF Quantizer (V35)
 **A Variable BitRate (VBR) bare-metal quantization framework.**
 
-## 1. The Zero-Crutch Philosophy (Row-Wise vs. Group-Wise)
-
-The open-source quantization community relies on a shared deception: **Group-Wise Scaling**. To make standard 4-bit models (like AWQ or GGUF) retain their intelligence, they chop rows into tiny 64-weight blocks and inject gigabytes of hidden FP16 metadata (scales and zero-points) to prop up the math. 
-
-**VirtualBrain VBR abandons group-wise scaling entirely.**
-Instead of relying on hidden FP16 grids, VBR uses a custom Autoencoder to mathematically model the weight distribution of an *entire row* using a Continuous Linkage Topology. One scale and one continuous curve per row. Zero metadata bloat.
-
----
-
-## 2. The Mathematical Formulation: V35 Topology
+## 1. The Mathematical Formulation: V35 Topology
 
 The core idea of the v35 iteration is to use a perfectly stable, 3-parameter topology (a, c, m) to "draw" a function, whose purpose is to approximate and discover the best magnitude values for each quantization bin (once multiplied with the row scaler). 
 
@@ -21,6 +12,15 @@ y = ((1 - a)x + a * x^m)^c
 
 **Surviving the Roller Coaster Loop:**
 Because the 'a' parameter is allowed to swing negative, the mathematical derivative of this curve can violently invert, causing the physical bins to loop backward on themselves. Traditional algorithms (like binary search trees) panic when given non-monotonic arrays. V35 utilizes a brute-force hardware sweep that calculates the absolute physical distance to every bin independently. Even if the curve loops backward, V35 mathematically guarantees the absolute closest Voronoi assignment for all 14,336 weights in a row simultaneously.
+
+---
+
+## 2. The Zero-Crutch Philosophy (Row-Wise vs. Group-Wise)
+
+The open-source quantization community relies on a shared deception: **Group-Wise Scaling**. To make standard 4-bit models (like AWQ or GGUF) retain their intelligence, they chop rows into tiny 64-weight blocks and inject gigabytes of hidden FP16 metadata (scales and zero-points) to prop up the math. 
+
+**VirtualBrain VBR abandons group-wise scaling entirely.**
+Instead of relying on hidden FP16 grids, VBR uses a custom Autoencoder to mathematically model the weight distribution of an *entire row* using a Continuous Linkage Topology. One scale and one continuous curve per row. Zero metadata bloat.
 
 ---
 
@@ -71,7 +71,7 @@ We also used lm-evaluation-harness.py to independently retest the [`uncompressed
 | **HellaSwag (norm)** | 78.97% | 78.60% | **- 0.37%** |
 | **ARC-Challenge (norm)** | 51.11% | 52.22% | **+ 1.11% (Improvement!)** |
 
-*The Regularization Anomaly (ARC & Specifics):
+*Gemini explains The Regularization Anomaly (ARC & Specifics):
 Look at ARC-Challenge. Your compressed model actually beat the FP16 baseline by 1.11%. If you look closely at the sub-tasks, V36 also beat FP16 in Machine Learning (66.07% vs 62.50%) and Sociology (85.57% vs 85.07%).
 Why does this happen? Sometimes, stripping out the fractional precision (the "noise" in the FP16 weights) via a strict LUT curve actually acts as a mathematical regularizer. It forces the model to rely on its strongest, most salient logic pathways rather than getting distracted by micro-weights.*
 
