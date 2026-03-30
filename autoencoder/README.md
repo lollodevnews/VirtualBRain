@@ -1,12 +1,6 @@
 # VirtualBrain VBR PTQ: The Algebraic CDF Quantizer (V35)
 **A Variable BitRate (VBR) bare-metal quantization framework.**
 
-**THE EVOLUTION OF THIS PROJECT:** The journey started by wanting to move away from brute-force algorithms, leading us to simple neural networks and fixed anchor points. In V34, we moved to a Monte Carlo simulation but were bottlenecked by the extreme VRAM overhead of 3D mathematical grids and Mean Squared Error (MSE) evaluations. 
-
-With **V35**, we have completely shattered the previous frontier. By abandoning MSE in favor of a **Normalized L1 Energy Metric**, and replacing 3D tensor grids with a **Zero-Memory Algebraic CDF Shortcut**, V35 evaluates millions of non-linear Voronoi thresholds in a fraction of a millisecond. The result is an ultra-dense, mathematically pure compression engine that operates at the physical speed limit of the GPU.
-
----
-
 ## 1. The Zero-Crutch Philosophy (Row-Wise vs. Group-Wise)
 
 The open-source quantization community relies on a shared deception: **Group-Wise Scaling**. To make standard 4-bit models (like AWQ or GGUF) retain their intelligence, they chop rows into tiny 64-weight blocks and inject gigabytes of hidden FP16 metadata (scales and zero-points) to prop up the math. 
@@ -18,7 +12,7 @@ Instead of relying on hidden FP16 grids, VBR uses a custom Autoencoder to mathem
 
 ## 2. The Mathematical Formulation: V35 Topology
 
-In V34, we fought against complex non-linear bounds and k-substitutions to keep the polynomial curves stable. V35 introduces a perfectly stable, 3-parameter Desmos topology (a, c, m) that dynamically warps quantization bins without catastrophic algorithmic collapse.
+The core idea of the v35 iteration is to use a perfectly stable, 3-parameter Desmos topology (a, c, m) to "draw" a function, whose purpose is to approximate and discover the best magnitude values for each quantization bin (once multiplied with the row scaler). 
 
 **Interactive Desmos Topology Graph:** [Play with the V35 Curve Here](https://www.desmos.com/calculator/jwadm38ufo)
 
@@ -57,7 +51,7 @@ The VBR Sieve now measures the exact sum of the Y-axis divergences and divides i
 
 ## 5. The Hard Numbers (Qwen 2.5 7B)
 
-Unlike standard repositories, we publish the exact mathematical degradation to prove the structural coherence of our flat file sizes. Benchmarked on an AMD Instinct MI50.
+Unlike standard repositories, we publish the exact mathematical degradation to prove the structural coherence of our flat file sizes. Benchmarked on an AMD Instinct MI50 (processing 23 tps running on our custom HIP decoding kernel).
 
 | Architecture | Total File Size | Bits Per Weight | WikiText-2 Perplexity | Degradation |
 | :--- | :--- | :--- | :--- | :--- |
@@ -66,6 +60,18 @@ Unlike standard repositories, we publish the exact mathematical degradation to p
 | **V34 (Grid Search)** | 4.90 GB | ~5.60 bpw | 6.2285 | +0.1235 |
 | **V35 (High Fidelity)** | **4.10 GB** | **~4.52 bpw** | **6.1707** | **+0.0657** |
 | **V35 (Extreme VBR)** | **3.3 GB** | **~3.90 bpw** | **6.4151** | **+0.3101** |
+
+We also used lm-evaluation-harness.py to independently retest the [`uncompressed Qwen 2.5 7b`](./lm_evaluation_harness_results_basemodel.txt) and [`our high fidelity compression`](./lm_evaluation_harness_results_compressed.txt).
+
+| Benchmark | Standard FP16 | V36 Compressed | The Δ (Degradation) |
+| :--- | :--- | :--- | :--- |
+| **MMLU** | 71.94% | 71.75% | **- 0.19%** |
+| **HellaSwag (norm)** | 78.97% | 78.60% | **- 0.37%** |
+| **ARC-Challenge (norm)** | 51.11% | 52.22% | **+ 1.11% (Improvement!)** |
+
+*The Regularization Anomaly (ARC & Specifics):
+Look at ARC-Challenge. Your compressed model actually beat the FP16 baseline by 1.11%. If you look closely at the sub-tasks, V36 also beat FP16 in Machine Learning (66.07% vs 62.50%) and Sociology (85.57% vs 85.07%).
+Why does this happen? Sometimes, stripping out the fractional precision (the "noise" in the FP16 weights) via a strict LUT curve actually acts as a mathematical regularizer. It forces the model to rely on its strongest, most salient logic pathways rather than getting distracted by micro-weights.*
 
 *Note: The footprints reported above encompass all compressed matrices, polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
 
