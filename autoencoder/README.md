@@ -61,6 +61,8 @@ Unlike standard repositories, we publish the exact mathematical degradation to p
 | **V35 (High Fidelity)** | **4.10 GB** | **~4.52 bpw** | **6.1707** | **+0.0657** |
 | **V35 (Extreme VBR)** | **3.3 GB** | **~3.90 bpw** | **6.4151** | **+0.3101** |
 
+*Note: The footprints reported above encompass all compressed matrices, polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
+
 We also used lm-evaluation-harness.py to independently retest the [`uncompressed Qwen 2.5 7b`](./lm_evaluation_harness_results_basemodel.txt) and [`our high fidelity compression`](./lm_evaluation_harness_results_compressed.txt).
 
 | Benchmark | Standard FP16 | V36 Compressed | The Δ (Degradation) |
@@ -72,8 +74,6 @@ We also used lm-evaluation-harness.py to independently retest the [`uncompressed
 *The Regularization Anomaly (ARC & Specifics):
 Look at ARC-Challenge. Your compressed model actually beat the FP16 baseline by 1.11%. If you look closely at the sub-tasks, V36 also beat FP16 in Machine Learning (66.07% vs 62.50%) and Sociology (85.57% vs 85.07%).
 Why does this happen? Sometimes, stripping out the fractional precision (the "noise" in the FP16 weights) via a strict LUT curve actually acts as a mathematical regularizer. It forces the model to rely on its strongest, most salient logic pathways rather than getting distracted by micro-weights.*
-
-*Note: The footprints reported above encompass all compressed matrices, polynomial headers, scale vectors, and VBR byte maps. Zero group-wise bloat.*
 
 ---
 
