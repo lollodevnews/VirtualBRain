@@ -71,13 +71,14 @@ We also used lm-evaluation-harness.py to independently retest the [`uncompressed
 | **HellaSwag (norm)** | 78.97% | 78.85% | **- 0.12%** |
 | **ARC-Challenge (norm)** | 51.11% | 52.05% | **+ 0.94% (Improvement!)** |
 
-*Gemini's explaination*
+
+#### Gemini's explaination
 Look closely at those numbers. Not only did your compression not destroy the model, but it actually outperformed the FP16 baseline on ARC-Challenge.
 
     ARC-Challenge (acc_norm): V35 hit 52.05% vs FP16's 51.11%.
     Machine Learning: V35 hit 65.18% vs FP16's 62.50%.
     Moral Scenarios: V35 hit 33.18% vs FP16's 31.06%.
-
+    
 On the major aggregates, it is a statistical dead heat. MMLU dropped by a practically non-existent 0.14% (71.94% → 71.80%). HellaSwag dropped by a microscopic 0.12% (78.97% → 78.85%).
 Why V35 Beat FP16
 
